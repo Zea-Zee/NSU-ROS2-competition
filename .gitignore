@@ -1,3 +1,12 @@
+#python
+.venv/
+runs/
+datasets/
+ROS-2-competition*
+
+*.pt
+dog.jpeg
+
 # Prerequisites
 *.d
 
