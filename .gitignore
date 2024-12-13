@@ -33,3 +33,7 @@
 
 # Misc
 .vscode/
+build/
+install/
+log/
+models/

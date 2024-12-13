@@ -22,7 +22,6 @@ setup(
  maintainer_email='v.kudinov@g.nsu.ru',
  description='Referee console for Autorace 2023',
  license='Apache 2.0',
- tests_require=['pytest'],
  entry_points={
      'console_scripts': [
              'mission_autorace_2023_referee = referee_console.mission_autorace_2023_referee:main'
