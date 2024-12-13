@@ -1,5 +1,5 @@
 # AutoRace 2023
-A ROS2 metapackage that has necessary packages for AutoRace 2023 challenge.
+A ROS2 metapackages for AutoRace 2023 challenge.
 
 <div align="center">
   <img src="AutoRace.png" width="600"/>
@@ -13,26 +13,38 @@ A ROS2 metapackage that has necessary packages for AutoRace 2023 challenge.
 
 * `robot_bringup` - holds launch files, worlds and multiple configurations that serve as an example and as a required system for AutoRace to work.
 
+* `my_robot_controller` - our custom package wich holds node for controle robot.
+
 ## Usage for AutoRace 2023
 
 1. Install dependencies
 
-    ```bash
-    cd ~/template_ws    # your workspace folder
-    rosdep install --from-paths src --ignore-src -r -i -y --rosdistro humble
-    ```
+	```bash
+		cd ~/ros2_ws
+		rm -rf build/ install/ log/
+		colcon build
+		source install/setup.bash
 
-2. Build the project
+		sudo apt update
+		sudo apt upgrade -y
 
-    ```bash
-    colcon build
-    ```
+		sudo apt install curl -y
+		sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+		sudo sh -c 'echo "deb http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2-latest.list'
+		sudo apt update
 
-3. Source the workspace
+		rosdep update
+		rosdep install --from-paths src --ignore-src -r -i -y --rosdistro humble
 
-    ```bash
-    . ~/template_ws/install/setup.bash
-    ```
+		sudo apt install python3-ament-tools
+		sudo apt install ros-humble-geographic-msgs ros-humble-robot-localization
+
+		pip install keyboard
+
+		rm -rf build/ install/ log/
+		colcon build
+		source install/setup.bash
+	```
 
 4. Launch the simulation
 
@@ -40,10 +52,10 @@ A ROS2 metapackage that has necessary packages for AutoRace 2023 challenge.
     ros2 launch robot_bringup autorace_2023.launch.py
     ```
 
-5. Run your own launch file that controls the robot
+5. Run control package
 
     ```bash
-    ros2 launch <your_package> <your_launch>
+    	ros2 run my_robot_controller run
     ```
 
 6. Run the referee
@@ -51,5 +63,3 @@ A ROS2 metapackage that has necessary packages for AutoRace 2023 challenge.
     ```bash
     ros2 run referee_console mission_autorace_2023_referee
     ```
-
-**Good luck!**
