@@ -2,6 +2,7 @@ import rclpy
 import cv2
 import keyboard
 import time
+import os
 import pygame
 
 from rclpy.node import Node
@@ -12,10 +13,12 @@ from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
 
 
+DATASET_COLLECTOR_PATH = '/home/zea/Desktop/NSU-ROS2-competition/media/dataset_photos'
+
+
 class Detector():
     def __init__(self):
         self.net = None
-
 
 
 class Robot(Node):
@@ -37,7 +40,8 @@ class Robot(Node):
 
         self.bridge = CvBridge()
 
-        self.create_subscription(Image, '/camera/image_raw', self._camera_callback, 10)
+        self.create_subscription(
+            Image, '/color/image', self._camera_callback, 10)
 
         self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
 
@@ -45,9 +49,7 @@ class Robot(Node):
 
         self.create_timer(0.1, self.process_mode)
 
-
         self.get_logger().info('Robot interface initialized')
-
 
     def _camera_callback(self, msg):
         try:
@@ -77,25 +79,35 @@ class Robot(Node):
         cmd.linear.x = linear_x
         cmd.angular.z = angular_z
         self.cmd_vel_publisher.publish(cmd)
-        self.get_logger().info(f"Command sent: linear_x={linear_x}, angular_z={angular_z}")
-        
+        # self.get_logger().info(f"Command sent: linear_x={linear_x}, angular_z={angular_z}")
+
     def process_mode(self):
         image = self.cv_image
+
+    def save_image(self, path):
+        timestamp = int(time.time() * 1000)
+        filename = os.path.join(path, f"image_{timestamp}.png")
+        try:
+            cv2.imwrite(filename, self.get_image())
+        except Exception as e:
+            print(f"Error saving image: {e}")
 
 
 class WASDController:
     def __init__(self, robot):
         self.robot = robot
-        self.linear_speed = 0.2  # Скорость движения вперёд/назад
-        self.angular_speed = 0.5  # Скорость поворота
+        self.linear_speed = 0.4  # Скорость движения вперёд/назад
+        self.angular_speed = 1.0  # Скорость поворота
 
         # Инициализация pygame
         pygame.init()
-        self.screen = pygame.display.set_mode((200, 200))  # Маленькое окно для фокуса
+        self.screen = pygame.display.set_mode(
+            (200, 200))  # Маленькое окно для фокуса
         pygame.display.set_caption("WASD Controller")
 
         self.robot.get_logger().info("WASD controller initialized with pygame.")
-        self.robot.get_logger().info("Use WASD keys to control the robot. Close the window to quit.")
+        self.robot.get_logger().info(
+            "Use WASD keys to control the robot. Close the window to quit.")
 
     def handle_input(self):
         """Обрабатывает события pygame и отправляет команды роботу."""
@@ -112,6 +124,7 @@ class WASDController:
         else:
             # Если ни одна клавиша не нажата, робот останавливается
             self.robot.move(0.0, 0.0)
+
     def check_exit(self):
         """Проверяет, нужно ли завершить программу."""
         for event in pygame.event.get():
@@ -127,7 +140,10 @@ def main(args=None):
 
     frequency = 10  # Частота обработки (Гц)
     period = 1 / frequency  # Период обработки (сек)
-    
+
+    last_time_photo = time.time()
+    photos_counter = 0
+
     try:
         while rclpy.ok() and robot.not_finished:
             rclpy.spin_once(robot, timeout_sec=0.1)
@@ -141,7 +157,8 @@ def main(args=None):
             # Обработка одометрии
             odometry = robot.get_odometry()
             if odometry['position']:
-                robot.get_logger().info(f"Robot position: {odometry['position']}")
+                10
+                # robot.get_logger().info(f"Robot position: {odometry['position']}")
             rclpy.spin_once(robot, timeout_sec=0.1)
 
             if controller.check_exit():
@@ -149,6 +166,12 @@ def main(args=None):
                 break
 
             controller.handle_input()
+
+            if time.time() - last_time_photo > 1:
+                robot.save_image(DATASET_COLLECTOR_PATH)
+                photos_counter += 1
+                last_time_photo = time.time()
+                robot.get_logger().info(f"Made a {photos_counter}'th photo")
 
     except KeyboardInterrupt:
         robot.get_logger().info('Shutting down robot node...')
