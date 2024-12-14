@@ -4,8 +4,8 @@ runs/
 datasets/
 ROS-2-competition*
 
-*.pt
-dog.jpeg
+# *.pt
+# dog.jpeg
 
 # Prerequisites
 *.d
