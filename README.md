@@ -1,6 +1,8 @@
 # AutoRace 2023
 A ROS2 metapackages for AutoRace 2023 challenge.
 
+![alt text](demo.gif)
+
 <div align="center">
   <img src="AutoRace.png" width="600"/>
 </div>
