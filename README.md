@@ -63,3 +63,15 @@ A ROS2 metapackages for AutoRace 2023 challenge.
     ```bash
     ros2 run referee_console mission_autorace_2023_referee
     ```
+
+
+# Для наших!!!!
+
+Очень сложна:
+
+1. Собрат и запустит
+	```bash
+	colcon build
+	source install/setup.sh
+	ros2 launch robot_bringup autorace_2023.launch.py
+	```
