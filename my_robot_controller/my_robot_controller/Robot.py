@@ -50,7 +50,7 @@ class Robot(Node):
         )
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        self.create_timer(0.1, self.process_mode)
+        self.create_timer(0.01, self.process_mode)
 
         self.get_logger().info('Robot interface initialized')
     """
@@ -112,13 +112,13 @@ class Robot(Node):
 
     # Main function
     def process_mode(self):
-        if self.cv_image:
+        if self.cv_image is not None:
             self.lane_follow.just_follow(self)
 
 
 # Class for lane following code
 class LaneFollowing():
-    def __init__(self, speed=1.5, h=None, w=None):
+    def __init__(self, speed=0.15, h=None, w=None):
         h_real = h//4 if h else 212
         w_real = w//6 if w else 60
 
@@ -127,7 +127,7 @@ class LaneFollowing():
 
     def just_follow(self, robot: Robot):
         # Конвертация сообщения ROS в OpenCV изображение
-        image = robot.cv_image()
+        image = robot.cv_image
         condition = ((image[:, :, 2] > 220) & (image[:, :, 1] > 220) & (image[:, :, 0] < 30))
         image[condition] = 255
         grays = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -190,7 +190,7 @@ class LaneFollowing():
 
         # Движение
 
-        robot.move(linear_x=self.speed, angular_z=(self.error * 90.0 / 40) / 15)
+        robot.move(linear_x=self.speed, angular_z=(self.error * 90.0 / 400) / 15)
         # Отображение результатов
 
         if cpt1 and cpt2:
@@ -199,8 +199,8 @@ class LaneFollowing():
             cv2.circle(dst, (int(cpt2[0]), int(cpt2[1])), 2, (255, 0, 0), 2)
 
         # Раскоментить, чтобы видеть точки и прочее
-        #cv2.imshow('Camera', image)
-        #cv2.imshow('Distance image', dst)
+        cv2.imshow('Camera', image)
+        cv2.imshow('Distance image', dst)
         cv2.waitKey(1)
 
         

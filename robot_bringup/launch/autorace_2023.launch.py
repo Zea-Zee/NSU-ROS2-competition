@@ -78,7 +78,16 @@ def generate_launch_description():
         }],
         output='screen'
     )
-#
+    robot_controller = Node(
+        package='my_robot_controller',
+        executable='run'
+    )
+    referee = Node(
+        package='referee_console',
+        executable='mission_autorace_2023_referee'
+    )
+
+
     return LaunchDescription([
         gz_sim,
         DeclareLaunchArgument('rviz', default_value='true',
@@ -88,5 +97,8 @@ def generate_launch_description():
         rviz,
         TimerAction(
             period=0.0,
-            actions=[create])
+            actions=[create]),
+        TimerAction(
+            period=5.0,
+            actions=[referee, robot_controller])
     ])
