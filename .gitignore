@@ -42,3 +42,7 @@ dog.jpeg
 
 # Misc
 .vscode/
+build/
+install/
+log/
+models/
