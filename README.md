@@ -1,5 +1,5 @@
-# AutoRace 2023
-A ROS2 metapackages for AutoRace 2023 challenge.
+# AutoRace 2024
+A ROS2 metapackages for AutoRace 2024 challenge.
 
 ![alt text](demo.gif)
 
@@ -17,63 +17,38 @@ A ROS2 metapackages for AutoRace 2023 challenge.
 
 * `my_robot_controller` - our custom package wich holds node for controle robot.
 
-## Usage for AutoRace 2023
+## Usage for AutoRace 2024
 
 1. Install dependencies
+```bash
+cd ~/ros2_ws
+rm -rf build/ install/ log/
+colcon build
+source install/setup.bash
 
-	```bash
-	cd ~/ros2_ws
-	rm -rf build/ install/ log/
-	colcon build
-	source install/setup.bash
+sudo apt update
+sudo apt upgrade -y
 
-	sudo apt update
-	sudo apt upgrade -y
+sudo apt install curl -y
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+sudo sh -c 'echo "deb http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2-latest.list'
+sudo apt update
 
-	sudo apt install curl -y
-	sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
-	sudo sh -c 'echo "deb http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2-latest.list'
-	sudo apt update
+rosdep update
+rosdep install --from-paths src --ignore-src -r -i -y --rosdistro humble
 
-	rosdep update
-	rosdep install --from-paths src --ignore-src -r -i -y --rosdistro humble
+sudo apt install python3-ament-tools
+sudo apt install ros-humble-geographic-msgs ros-humble-robot-localization
 
-	sudo apt install python3-ament-tools
-	sudo apt install ros-humble-geographic-msgs ros-humble-robot-localization
+pip install keyboard
 
-	pip install keyboard
+rm -rf build/ install/ log/
+colcon build
+source install/setup.bash
+```
 
-	rm -rf build/ install/ log/
-	colcon build
-	source install/setup.bash
-	```
-
-4. Launch the simulation
-
-    ```bash
-    ros2 launch robot_bringup autorace_2023.launch.py
-    ```
-
-5. Run control package
-
-    ```bash
-    	ros2 run my_robot_controller run
-    ```
-
-6. Run the referee
-
-    ```bash
-    ros2 run referee_console mission_autorace_2023_referee
-    ```
-
-
-# Для наших!!!!
-
-Очень сложна:
-
-1. Собрат и запустит
-	```bash
-	colcon build
-	source install/setup.sh
-	ros2 launch robot_bringup autorace_2023.launch.py
-	```
+4. Launch (Now u can work rigth in your repo folder and launch.sh will copy and launch your packages into ~/ros2_ws/)
+```bash
+chmod +x launch.sh
+./launch.sh
+```
