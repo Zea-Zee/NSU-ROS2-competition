@@ -1,42 +1,46 @@
+from typing import List, Tuple
 from ultralytics import YOLO
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 import rclpy
-import threading
 import time
 import cv2
 import numpy as np
 import os
 
 
+WEIGHTS_PATH = f"{os.getcwd()}/src/my_robot_controller/model/best.pt"
+
 class Detector:
-    def __init__(self, model_path: str=f"{os.getcwd()}/src/my_robot_controller/model/best.pt", confidence_threshold: float=0.2):
+    def __init__(self, model_path: str = WEIGHTS_PATH, confidence_threshold: float = 0.2):
         # Загрузка модели YOLOv11n
-        self.model = YOLO(model_path)
-        self.confidence_threshold = confidence_threshold
-        self.processed_image = None
-        self.lock = threading.Lock()  # Для потокобезопасного обновления изображения
+        self.model: YOLO = YOLO(model_path)
+        self.confidence_threshold: float = confidence_threshold
 
-    def process_image(self, image):
+    def process_image(self, image: Image) -> Tuple[List[dict], np.ndarray, float]:
         """Запускает инференс YOLO и возвращает изображение с размеченными объектами."""
-        result = self.model(image)[0]  # return a list of Results objects
-        boxes = result.boxes  # Boxes object for bounding box outputs
-        masks = result.masks  # Masks object for segmentation masks outputs
-        keypoints = result.keypoints  # Keypoints object for pose outputs
-        probs = result.probs  # Probs object for classification outputs
-        obb = result.obb  # Oriented boxes object for OBB outputs
-
-        # result.show()  # display to screen
-        plot_img = result.plot()
+        start_time = time.time()
+        yolo_result = self.model(image)[0]
+        plot_img = yolo_result.plot()
         image_np = np.array(plot_img)
-        cv2.imshow('Detector', image_np)
-        cv2.waitKey(1)
-
-        return result
-
-    def get_processed_image(self):
-        """Возвращает последнее обработанное изображение."""
-        with self.lock:
-            return self.processed_image
+        boxes = []
+        for box in yolo_result.boxes:
+            class_id = int(box.cls)
+            confidence = box.conf[0]
+            label = yolo_result.names[class_id]
+            box_result = {
+                'x_min': box.xyxy[0][0],  # xmin coordinate
+                'y_min': box.xyxy[0][1],  # ymin coordinate
+                'x_max': box.xyxy[0][2],  # xmax coordinate
+                'y_max': box.xyxy[0][3],  # ymax coordinate
+                'width': box.xyxy[0][2] - box.xyxy[0][0],  # width of the box
+                'height': box.xyxy[0][3] - box.xyxy[0][1],  # height of the box
+                'area': (box.xyxy[0][2] - box.xyxy[0][0]) * (box.xyxy[0][3] - box.xyxy[0][1]),  # area of the box
+                'label': label,
+                'conf': confidence,
+            }
+            boxes.append(box_result)
+        duration = time.time() - start_time
+        return boxes, image_np, duration

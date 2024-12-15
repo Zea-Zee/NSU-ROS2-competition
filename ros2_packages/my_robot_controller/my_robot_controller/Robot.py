@@ -1,14 +1,21 @@
 import cv2
 import rclpy
 import time
+from colorama import Fore, Style
+import random
 
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from cv_bridge import CvBridge
+import numpy as np
 from sensor_msgs.msg import Image, LaserScan
 from nav_msgs.msg import Odometry
 from .Detector import Detector
 # import threading
+
+
+YOLO_FPS = 2
+PROCESS_FREQUENCY = 250
 
 
 class Robot(Node):
@@ -29,11 +36,12 @@ class Robot(Node):
         self.angular_velocity = None
 
         self.frame = None
-## TODO: сделать блокировку
+# TODO: сделать блокировку
         self.cv_image = None
         self.depth_image = None
         self.lidar_scan = None
-        self.yolo_processed_image = None
+        self.yolo_result = None
+        self.yolo_image = None
 
         self.bridge = CvBridge()
 
@@ -57,8 +65,8 @@ class Robot(Node):
 
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        self.create_timer(0.01, self.process_mode)
-        self.create_timer(0.5, self.run_detector)
+        self.create_timer(1.0 / PROCESS_FREQUENCY, self.process_mode)
+        self.create_timer(1.0 / YOLO_FPS, self.run_detector)
 
         self.get_logger().info('Robot interface initialized')
     """
@@ -126,14 +134,28 @@ class Robot(Node):
 
     # Main function
     def process_mode(self):
+        # start_time = time.time()
         if self.cv_image is not None:
             self.lane_follow.just_follow(self)
+        # if random.randint(0, 10) == 1:
+            # self.get_logger().info(f"Lane was processed for {time.time() - start_time}s")
 
-    def run_detector(self):
-        """Фоновый поток для запуска YOLO-детектора."""
-        if self.cv_image is not None:
-## TODO: сделать блокировку
-            self.yolo_process_result = self.detector.process_image(self.cv_image)
+    def run_detector(self) -> None:
+        try:
+            if self.cv_image is not None:
+                # TODO: сделать блокировку
+                self.boxes, self.yolo_image, duration = self.detector.process_image(
+                    self.cv_image)
+
+                # logging
+                self.get_logger().info(
+                    f"Image was processed with YOLO for {duration} seconds")
+                # for box in self.boxes:
+                # self.get_logger().info(f"Found {box['label']} with {box['conf']} conf and {box['area']} area")
+        except Exception as e:
+            self.get_logger().info(
+                f"Robot.run_detector exception: {Fore.RED}{e}{Style.RESET_ALL}")
+
 
 # Class for lane following code
 class LaneFollowing():
@@ -224,6 +246,9 @@ class LaneFollowing():
             cv2.circle(dst, (int(cpt2[0]), int(cpt2[1])), 2, (255, 0, 0), 2)
 
         # Раскоментить, чтобы видеть точки и прочее
-        cv2.imshow('Camera', image)
-        cv2.imshow('Distance image', dst)
-        cv2.waitKey(1)
+        # if robot.yolo_image is not None and dst is not None:
+            # concatenated_image = np.vstack((robot.yolo_image, dst))
+        if image is not None and dst is not None:
+            concatenated_image = np.vstack((image, dst))
+            cv2.imshow('Camera', concatenated_image)
+            cv2.waitKey(1)
