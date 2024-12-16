@@ -14,13 +14,72 @@ from .Detector import Detector
 # import threading
 
 
-YOLO_FPS = 2
-PROCESS_FREQUENCY = 250
+YOLO_FPS = 4
+PROCESS_FREQUENCY = 100
+
+
+class StateMachine:
+    def __init__(self, states):
+        self.states = states
+        self.current_state = states[0]
+        self.name_to_index = {name: i for i, name in enumerate(states)}
+
+    def increase_state(self):
+        index = self.name_to_index[self.current_state]
+        next_index = (index + 1) % len(self.states)
+        self.current_state = self.states[next_index]
+
+    def decrease_state(self):
+        index = self.name_to_index[self.current_state]
+        prev_index = (index - 1) % len(self.states)
+        self.current_state = self.states[prev_index]
+
+    def set_state(self, state):
+        if state not in self.states:
+            raise Exception(f"You are trying to set incorrect state {state}")
+        index = self.name_to_index[state]
+        self.current_state = self.states[index]
+
+    def set_next_state(self, state):
+        """ Replace state with yours if it is next.
+
+        Args:
+            state (str): State u can try to set
+
+        Returns:
+            Bool: If it really next state for current it will be set and return True else return False
+        """
+        index = self.name_to_index[state]
+        if self.name_to_index[self.current_state] + 1 == index:
+            self.increase_state()
+            return True
+        return False
+
+    def get_state(self):
+        return self.current_state
 
 
 class Robot(Node):
-    def __init__(self, camera=None, odom=None, twist=None):
+    def __init__(self, mode: str = 'auto', state: str = None, camera=None, odom=None, twist=None):
         super().__init__("moving_robot")
+
+        # Аргумент изначально будет приходить из параметров запуска, чтобы можно было управлять вручную
+        modes = [
+            'auto',
+            'manual',
+        ]
+        if mode not in modes:
+            mode = 'auto'
+
+        # Создаем машину состояний состояющую из препятствий
+        self.state_machine = StateMachine(
+            ['traffic_light', 'crossroad', 'walls', 'parking', 'crossing', 'tunnel'])
+        if state is not None:
+            self.state_machine.set_state(state)
+
+        self.obstacles = {
+            'tunnel': TunnelObstacle()
+        }
 
         self.detector = Detector()
         self.lane_follow = LaneFollowing()
@@ -36,7 +95,6 @@ class Robot(Node):
         self.angular_velocity = None
 
         self.frame = None
-# TODO: сделать блокировку
         self.cv_image = None
         self.depth_image = None
         self.lidar_scan = None
@@ -65,7 +123,9 @@ class Robot(Node):
 
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
 
+        # Таймер для управления роботом (движение по линии / препятствиям и тд)
         self.create_timer(1.0 / PROCESS_FREQUENCY, self.process_mode)
+        # Таймер для детектора, по которому закидываются картинки
         self.create_timer(1.0 / YOLO_FPS, self.run_detector)
 
         self.get_logger().info('Robot interface initialized')
@@ -135,26 +195,38 @@ class Robot(Node):
     # Main function
     def process_mode(self):
         # start_time = time.time()
-        if self.cv_image is not None:
+        if self.state_machine.get_state == 'tunnel':
+            self.obstacles['tunnel'].process()
+        elif self.cv_image is not None:
             self.lane_follow.just_follow(self)
         # if random.randint(0, 10) == 1:
             # self.get_logger().info(f"Lane was processed for {time.time() - start_time}s")
 
     def run_detector(self) -> None:
+        # Запускает детектор, который получает боксы из YOLO в виде списка словарей, посмотреть структуру можно внутри функции
         try:
             if self.cv_image is not None:
                 # TODO: сделать блокировку
-                self.boxes, self.yolo_image, duration = self.detector.process_image(
-                    self.cv_image)
+                boxes, self.yolo_image, duration = self.detector.process_image(self.cv_image)
+                self.check_for_state_transition(boxes)
 
                 # logging
-                self.get_logger().info(
-                    f"Image was processed with YOLO for {duration} seconds")
-                # for box in self.boxes:
-                # self.get_logger().info(f"Found {box['label']} with {box['conf']} conf and {box['area']} area")
+                # self.get_logger().info(
+                # f"Image was processed with YOLO for {duration} seconds")
+                # for box in boxes:
+                    # self.get_logger().info(f"Found {box['label']} with {box['conf']} conf and {box['area']} area")
         except Exception as e:
-            self.get_logger().info(
+            self.get_logger().error(
                 f"Robot.run_detector exception: {Fore.RED}{e}{Style.RESET_ALL}")
+
+    def check_for_state_transition(self, boxes):
+        # Возмонжо стоит поменять, запускается из детектора и пытается перейти к следующему состоянию по условию
+        for box in boxes:
+            # if box['conf'] > 0.85:
+                # self.get_logger().info(f"Found {box['label']} with {box['conf']} conf and {box['area']} area")
+            if box['label'] == 'tunnel_sign' and box['area'] > 10000.0 and box['conf'] > 0.85:# and self.state_machine.set_next_state('tunnel'):
+                self.get_logger().info("States was updated to tunnel by")
+                self.get_logger().info(f"{box['conf']} conf and {box['area']} area")
 
 
 # Class for lane following code
@@ -245,10 +317,29 @@ class LaneFollowing():
             cv2.circle(dst, (int(cpt1[0]), int(cpt1[1])), 2, (0, 0, 255), 2)
             cv2.circle(dst, (int(cpt2[0]), int(cpt2[1])), 2, (255, 0, 0), 2)
 
-        # Раскоментить, чтобы видеть точки и прочее
-        # if robot.yolo_image is not None and dst is not None:
-            # concatenated_image = np.vstack((robot.yolo_image, dst))
-        if image is not None and dst is not None:
-            concatenated_image = np.vstack((image, dst))
+        # Выводит склееное вертикально изображение из yolo и нахождение центра масс
+        if robot.yolo_image is not None and dst is not None:
+            concatenated_image = np.vstack((robot.yolo_image, dst))
+        # то же что и выше но картинка не после yolo а оригинальная
+        # if image is not None and dst is not None:
+        #     concatenated_image = np.vstack((image, dst))
             cv2.imshow('Camera', concatenated_image)
             cv2.waitKey(1)
+
+
+# Класс-родитель препятствие в каждом из которых в process будет реализована логика прохождения препятствия
+class Obstacle:
+    def __init__(self, name: str):
+        self.name = name
+
+    def process(self, robot: Robot):
+        return None
+
+# Класс препятствия для туннеля
+class TunnelObstacle(Obstacle):
+    def __init__(self):
+        super().__init__('tunnel')
+
+    def process(self, robot: Robot):
+        robot.move(linear_x=0.01)
+        robot.get_logger().info(f"lidar shape: {robot.get_lidar()}")

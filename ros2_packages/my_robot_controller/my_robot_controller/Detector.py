@@ -14,13 +14,18 @@ import os
 WEIGHTS_PATH = f"{os.getcwd()}/src/my_robot_controller/model/best.pt"
 
 class Detector:
-    def __init__(self, model_path: str = WEIGHTS_PATH, confidence_threshold: float = 0.2):
-        # Загрузка модели YOLOv11n
+    def __init__(self, model_path: str = WEIGHTS_PATH):
         self.model: YOLO = YOLO(model_path)
-        self.confidence_threshold: float = confidence_threshold
 
     def process_image(self, image: Image) -> Tuple[List[dict], np.ndarray, float]:
-        """Запускает инференс YOLO и возвращает изображение с размеченными объектами."""
+        """Закидывает картинку в yolo
+        Returns:
+            Tuple[
+                List[dict] - список словарей, где каждый словарь - ббокс,
+                np.ndarray - просто картинка с ббоксами,
+                float - длительность инференса
+            ]
+        """
         start_time = time.time()
         yolo_result = self.model(image)[0]
         plot_img = yolo_result.plot()

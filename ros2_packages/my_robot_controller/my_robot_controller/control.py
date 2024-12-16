@@ -24,13 +24,10 @@ from .Robot import Robot
 from .WASDMove import WASDController
 
 
-# HOME = os.getcwd()
-# print(f"HOME directory is {HOME}")
-
-
 def main(args=None):
     rclpy.init(args=args)
-    robot = Robot()
+    # robot = Robot()
+    robot = Robot(state='crossing')
     # controller = WASDController(robot)
 
     frequency = 10  # Частота обработки (Гц)
