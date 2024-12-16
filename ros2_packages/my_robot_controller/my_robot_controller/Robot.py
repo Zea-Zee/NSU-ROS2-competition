@@ -73,7 +73,7 @@ class Robot(Node):
 
         # Создаем машину состояний состояющую из препятствий
         self.state_machine = StateMachine(
-            ['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign'])
+            ['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign', 'just_follow'])
         if state is not None:
             self.state_machine.set_state(state)
 
@@ -229,7 +229,8 @@ class Robot(Node):
             self.get_logger().info(f"Traffic light: {traffic_light_color}. Game started!")
 
         if traffic_light_color.endswith('green') or (traffic_light_color == 'None' and self.can_move):
-            self.lane_follow.just_follow(self)
+            #self.lane_follow.just_follow(self)
+            self.state_machine.set_state('just_follow')
 
     # T-cross completing function
     def T_cross_road(self):
@@ -266,27 +267,24 @@ class Robot(Node):
         if self.cv_image is not None:
 
             self.mode = self.state_machine.get_state()
+            #self.get_logger().info(f'{self.mode}')
 
+            #['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign', 'just_follow']
             match (self.mode):
                 case 'traffic_light':
                     self.obey_traffic_lights()
                 case 'T_crossroad':
                     self.T_cross_road()
                 case 'works_sign':
-                    
-                    """
-                    Здесь код для коридора
-                    """
                     pass 
                 case 'parking_sign':
-                    """
-                    Parking code etc
-                    """
                     pass
                 case 'crossing_sign':
                     pass
                 case 'tunnel_sign':
                     pass
+                case 'just_follow':
+                    self.lane_follow.just_follow(self)
                 case _:
                     self.lane_follow.just_follow(self)
 
@@ -314,23 +312,31 @@ class Robot(Node):
             #break
             bbox = curr_depth_image[int(box['y_min']):int(box['y_max']), int(box['x_min']):int(box['x_max'])]
             #self.get_logger().info(f'{bbox[len(bbox)//2, len(bbox[0])//2]}')
-            if bbox[len(bbox)//2, len(bbox[0])//2] > 0.4: # скип если далеко
+            if bbox[len(bbox)//2, len(bbox[0])//2] > 0.3: # скип если далеко
                 continue
             
             if box['label'] == 'T_crossroad' and box['conf'] > 0.80: #Развилка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+                self.state_machine.set_state('T_crossroad')
 
             elif box['label'] == 'works_sign' and box['conf'] > 0.80: #Стены
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+                self.state_machine.set_state('works_sign')
             
             elif box['label'] == 'parking_sign' and box['conf'] > 0.80: #Парковка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+                self.state_machine.set_state('parking_sign')
             
             elif box['label'] == 'crossing_sign' and box['conf'] > 0.80: #Пешеходный переход
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+                self.state_machine.set_state('crossing_sign')
             
             elif box['label'] == 'tunnel_sign' and box['conf'] > 0.80: #Тунель
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+                self.state_machine.set_state('tunnel_sign')
+            
+            else:
+                pass
 
             # if box['label'] == 'tunnel_sign' and box['conf'] > 0.80:# and self.state_machine.set_next_state('tunnel'):
                 # self.get_logger().info("States was updated to tunnel by")
