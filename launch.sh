@@ -55,4 +55,3 @@ ros2 launch robot_bringup autorace_2023.launch.py sp:=$input
 
 # Возврат в исходную директорию (при завершении ros2 launch)
 cleanup
-

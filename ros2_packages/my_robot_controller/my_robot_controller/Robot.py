@@ -14,7 +14,7 @@ from .Detector import Detector
 # import threading
 
 
-YOLO_FPS = 4
+YOLO_FPS = 3
 PROCESS_FREQUENCY = 100
 
 
@@ -73,7 +73,7 @@ class Robot(Node):
 
         # Создаем машину состояний состояющую из препятствий
         self.state_machine = StateMachine(
-            ['traffic_light', 'crossroad', 'walls', 'parking', 'crossing', 'tunnel'])
+            ['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign'])
         if state is not None:
             self.state_machine.set_state(state)
 
@@ -81,19 +81,25 @@ class Robot(Node):
             'tunnel': TunnelObstacle()
         }
 
-        self.detector = Detector()
-        self.lane_follow = LaneFollowing()
+        self.detector = Detector() # YOLOv11 detector of signs
+        self.lane_follow = LaneFollowing() # LaneFollower class
         self.not_finished = True
         self.mode = None
 
+        # additional variables for moving
+        self.boxes = None
         self.error = None
 
+        # information about robot position and speed
         self.position = None
         self.orientation = None
 
+        self.can_move = False
+        self.side = None
         self.linear_velocity = None
         self.angular_velocity = None
 
+        # everything from topics
         self.frame = None
         self.cv_image = None
         self.depth_image = None
@@ -103,6 +109,7 @@ class Robot(Node):
 
         self.bridge = CvBridge()
 
+        # subscribers functions
         self.create_subscription(
             Image, 
             '/color/image', 
@@ -145,7 +152,7 @@ class Robot(Node):
         try:
             self.lidar_scan = msg
         except Exception as e:
-            self.get_logger().error(f"Failed to convert depth image: {e}")
+            self.get_logger().error(f"Failed to convert lidar cloud: {e}")
 
     def _depth_callback(self, msg):
         try:
@@ -187,10 +194,12 @@ class Robot(Node):
             'angular_velocity': self.angular_velocity,
         }
 
+
     """
     This block of code is for your code and etc.
     Just work here and don't care
     """
+
 
     def move(self, linear_x=0.0, angular_z=0.0):
         cmd = Twist()
@@ -198,16 +207,88 @@ class Robot(Node):
         cmd.angular.z = angular_z
         self.cmd_vel_publisher.publish(cmd)
         # self.get_logger().info(f"Command sent: linear_x={linear_x}, angular_z={angular_z}")
+    
+    
+            
+    # traffic_lights moving
+    def obey_traffic_lights(self):
+        # additional function
+        def get_traffic_box(boxes):
+            if boxes is not None:
+                if len(boxes) > 1:
+                    boxes = sorted(self.boxes, key=lambda x: x['area'])
+                for box in boxes:
+                    if box['label'].startswith('traffic'):
+                        return box['label']
+            return 'None'
+        
+        traffic_light_color = get_traffic_box(self.boxes)
+
+        if traffic_light_color.endswith('green') and not self.can_move:
+            self.can_move = True
+            self.get_logger().info(f"Traffic light: {traffic_light_color}. Game started!")
+
+        if traffic_light_color.endswith('green') or (traffic_light_color == 'None' and self.can_move):
+            self.lane_follow.just_follow(self)
+
+    # T-cross completing function
+    def T_cross_road(self):
+        # additional function
+        def get_cross_road(boxes):
+            if self.boxes is not None:
+                boxes = self.boxes
+                if len(boxes) > 1:
+                    boxes = sorted(self.boxes, key=lambda x: -x['area'])
+                for box in boxes:
+                    if box['area'] > 13000:
+                        if box['label'].startswith('right') or box['label'].startswith('left'):
+                            return box['label']
+            return None
+        
+        side = get_cross_road(self.boxes)
+        angular_z = 1
+        cross_speed = 0.165
+        if side is not None:
+            side = side.split('_')[0]
+            if self.side is None:
+                self.get_logger().info(f"Current side found for T-crossing: {side}")
+                self.side = side
+            if side == 'left':
+                angular_z = 0.8
+            
+        if side is None:
+            if self.side == 'right':
+                angular_z = 0.8
+        self.lane_follow.just_follow(self, speed=cross_speed, z_speed=angular_z, hold_side=self.side)
 
     # Main function
     def process_mode(self):
-        # start_time = time.time()
-        if self.state_machine.get_state == 'tunnel':
-            self.obstacles['tunnel'].process()
-        elif self.cv_image is not None:
-            self.lane_follow.just_follow(self)
-        # if random.randint(0, 10) == 1:
-            # self.get_logger().info(f"Lane was processed for {time.time() - start_time}s")
+        if self.cv_image is not None:
+
+            self.mode = self.state_machine.get_state()
+
+            match (self.mode):
+                case 'traffic_light':
+                    self.obey_traffic_lights()
+                case 'T_crossroad':
+                    self.T_cross_road()
+                case 'works_sign':
+                    
+                    """
+                    Здесь код для коридора
+                    """
+                    pass 
+                case 'parking_sign':
+                    """
+                    Parking code etc
+                    """
+                    pass
+                case 'crossing_sign':
+                    pass
+                case 'tunnel_sign':
+                    pass
+                case _:
+                    self.lane_follow.just_follow(self)
 
     # Запуск детектора yolo
     def run_detector(self) -> None:
@@ -215,20 +296,13 @@ class Robot(Node):
         try:
             if self.cv_image is not None:
                 # TODO: сделать блокировку
-                boxes, self.yolo_image, duration = self.detector.process_image(self.cv_image)
-                self.check_for_state_transition(boxes)
+                self.boxes, self.yolo_image, _ = self.detector.process_image(self.cv_image)
+                self.check_for_state_transition(self.boxes)
 
-                #self.get_logger().info(f'depth: {self.depth_image.shape}')
-                #self.get_logger().info(f'yolo: {self.yolo_image.shape}')
-                
-                # logging
-                # self.get_logger().info(
-                # f"Image was processed with YOLO for {duration} seconds")
-                # for box in boxes:
-                    # self.get_logger().info(f"Found {box['label']} with {box['conf']} conf and {box['area']} area")
         except Exception as e:
-            self.get_logger().error(
-                f"Robot.run_detector exception: {Fore.RED}{e}{Style.RESET_ALL}")
+            pass
+            #self.get_logger().error(
+                #f"Robot.run_detector exception: {Fore.RED}{e}{Style.RESET_ALL}")
 
     # Определение испытания по bb из yolo
     def check_for_state_transition(self, boxes):
@@ -262,17 +336,17 @@ class Robot(Node):
                 # self.get_logger().info("States was updated to tunnel by")
                 # self.get_logger().info(f"{box['conf']} conf and {box['area']} area")
 
-
 # Class for lane following code
 class LaneFollowing():
-    def __init__(self, speed=0.15, h=None, w=None):
+    def __init__(self, h=None, w=None):
         h_real = h//4 if h else 212
         w_real = w//6 if w else 60
-
+        # constant variables for giving an good moving in cross road
+        self.const1, self.const2 = (h_real, w_real+15), (h_real*3, w_real-15)
+        # previous points
         self.prevpt1, self.prevpt2 = (h_real, w_real), (h_real*3, w_real)
-        self.speed = speed
 
-    def just_follow(self, robot: Robot):
+    def just_follow(self, robot: Robot, speed=0.15, z_speed=1.0, hold_side=None):
         # Конвертация сообщения ROS в OpenCV изображение
         image = robot.cv_image
         condition = ((image[:, :, 2] > 220) & (
@@ -288,7 +362,7 @@ class LaneFollowing():
         # Обработка нижней трети изображения
         height, width = gray.shape
         dst = gray[2 * height // 3:, :]
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
 
         dst = cv2.morphologyEx(dst, cv2.MORPH_CLOSE, kernel)
         # Нахождение компонентов
@@ -320,10 +394,15 @@ class LaneFollowing():
             min_idx2 = mindistance2.index(min_dist2) + 1
             print(min_dist1)
             # Определение новых точек
+
             cpt1 = tuple(centroids[min_idx1]
-                         ) if min_dist1 < 100 else self.prevpt1
+                         ) if min_dist1 < 100 else self.prevpt1 
+            if hold_side == 'right':
+                cpt1 = self.const1
             cpt2 = tuple(centroids[min_idx2]
-                         ) if min_dist2 < 100 else self.prevpt2
+                         ) if min_dist2 < 100 else self.prevpt2 
+            if hold_side == 'left':
+                cpt2 = self.const2
         else:
             # Если нет объектов, используем предыдущие точки
             cpt1, cpt2 = self.prevpt1, self.prevpt2
@@ -342,8 +421,8 @@ class LaneFollowing():
 
         # Движение
 
-        robot.move(linear_x=self.speed, angular_z=(
-            self.error * 90.0 / 400) / 15)
+        robot.move(linear_x=speed, angular_z=(
+            self.error * 90.0 * z_speed / 400) / 15)
         # Отображение результатов
 
         if cpt1 and cpt2:
