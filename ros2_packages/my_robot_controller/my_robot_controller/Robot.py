@@ -276,7 +276,8 @@ class Robot(Node):
                 case 'T_crossroad':
                     self.T_cross_road()
                 case 'works_sign':
-                    pass 
+                    self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
+                    # Функция прохождения лабиринта 
                 case 'parking_sign':
                     pass
                 case 'crossing_sign':
@@ -347,6 +348,7 @@ class LaneFollowing():
     def __init__(self, h=None, w=None):
         h_real = h//4 if h else 212
         w_real = w//6 if w else 60
+
         # constant variables for giving an good moving in cross road
         self.const1, self.const2 = (h_real, w_real+15), (h_real*3, w_real-15)
         # previous points
