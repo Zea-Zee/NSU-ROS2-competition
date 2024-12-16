@@ -43,10 +43,15 @@ colcon build
 # Очистка консоли
 #clear
 
+if [ -z "$1" ] || ! [[ "$1" =~ ^-?[0-9]+$ ]] || [ "$1" -gt 6 ] || [ "$1" -lt 0 ]; then
+  input=0
+else
+  input="$1"
+fi
+
 # Запуск Gazebo и ROS 2 с переданными аргументами
 echo "Запуск Gazebo и ROS 2..."
-ros2 launch robot_bringup autorace_2023.launch.py
+ros2 launch robot_bringup autorace_2023.launch.py sp:=$input
 
 # Возврат в исходную директорию (при завершении ros2 launch)
 cleanup
-
