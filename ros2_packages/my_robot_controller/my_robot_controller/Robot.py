@@ -104,8 +104,15 @@ class Robot(Node):
         self.bridge = CvBridge()
 
         self.create_subscription(
-            Image, '/color/image', self._camera_callback, 10)
-        self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
+            Image, 
+            '/color/image', 
+            self._camera_callback, 
+            10)
+        self.create_subscription(
+            Odometry, 
+            '/odom', 
+            self._odom_callback, 
+            10)
         self.create_subscription(
             Image,
             '/depth/image',
@@ -202,6 +209,7 @@ class Robot(Node):
         # if random.randint(0, 10) == 1:
             # self.get_logger().info(f"Lane was processed for {time.time() - start_time}s")
 
+    # Запуск детектора yolo
     def run_detector(self) -> None:
         # Запускает детектор, который получает боксы из YOLO в виде списка словарей, посмотреть структуру можно внутри функции
         try:
@@ -210,6 +218,9 @@ class Robot(Node):
                 boxes, self.yolo_image, duration = self.detector.process_image(self.cv_image)
                 self.check_for_state_transition(boxes)
 
+                #self.get_logger().info(f'depth: {self.depth_image.shape}')
+                #self.get_logger().info(f'yolo: {self.yolo_image.shape}')
+                
                 # logging
                 # self.get_logger().info(
                 # f"Image was processed with YOLO for {duration} seconds")
@@ -219,14 +230,37 @@ class Robot(Node):
             self.get_logger().error(
                 f"Robot.run_detector exception: {Fore.RED}{e}{Style.RESET_ALL}")
 
+    # Определение испытания по bb из yolo
     def check_for_state_transition(self, boxes):
         # Возмонжо стоит поменять, запускается из детектора и пытается перейти к следующему состоянию по условию
+        curr_depth_image = self.depth_image
         for box in boxes:
-            # if box['conf'] > 0.85:
-                # self.get_logger().info(f"Found {box['label']} with {box['conf']} conf and {box['area']} area")
-            if box['label'] == 'tunnel_sign' and box['area'] > 10000.0 and box['conf'] > 0.85:# and self.state_machine.set_next_state('tunnel'):
-                self.get_logger().info("States was updated to tunnel by")
-                self.get_logger().info(f"{box['conf']} conf and {box['area']} area")
+            #self.get_logger().info(f"{box['x_min']}, {box['y_min']}")
+            #self.get_logger().info(f"{box['x_max']}, {box['y_max']}")
+            #break
+            bbox = curr_depth_image[int(box['y_min']):int(box['y_max']), int(box['x_min']):int(box['x_max'])]
+            #self.get_logger().info(f'{bbox[len(bbox)//2, len(bbox[0])//2]}')
+            if bbox[len(bbox)//2, len(bbox[0])//2] > 0.4: # скип если далеко
+                continue
+            
+            if box['label'] == 'T_crossroad' and box['conf'] > 0.80: #Развилка
+                self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+
+            elif box['label'] == 'works_sign' and box['conf'] > 0.80: #Стены
+                self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+            
+            elif box['label'] == 'parking_sign' and box['conf'] > 0.80: #Парковка
+                self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+            
+            elif box['label'] == 'crossing_sign' and box['conf'] > 0.80: #Пешеходный переход
+                self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+            
+            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.80: #Тунель
+                self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+
+            # if box['label'] == 'tunnel_sign' and box['conf'] > 0.80:# and self.state_machine.set_next_state('tunnel'):
+                # self.get_logger().info("States was updated to tunnel by")
+                # self.get_logger().info(f"{box['conf']} conf and {box['area']} area")
 
 
 # Class for lane following code
