@@ -144,6 +144,11 @@ class Robot(Node):
         self.linear_velocity = None
         self.angular_velocity = None
 
+
+        self.declare_parameter('spawn_angle', 0.0)  # Значение по умолчанию
+        self.start_angle = self.get_parameter('spawn_angle').value
+        self.get_logger().info(f"Начальный угол поворота: {self.start_angle}")
+
         # everything from topics
         self.frame = None
         self.cv_image = None
@@ -405,27 +410,27 @@ class Robot(Node):
         if not self.ped_can_move_flag:
             self.lane_follow.stop(self)
             x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
-            yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+            yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.start_angle
             ang_speed = 3.14 / 32
-            if yaw <= 0 or yaw >= 90:
+            if yaw >= 0:
                 ang_speed = -ang_speed
             #if yaw <= 0 else -(3.14 / 32)
 
             self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
 
-            if np.degrees(yaw) >= 179 or np.degrees(yaw) <= -179: #or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
+            if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1: #or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
                 self.move(linear_x=0.0, angular_z=ang_speed)
             else:
                 self.move(linear_x=0.0, angular_z=0.0)
                 self.ped_can_move_flag = True
 
         if self.ped_can_move_flag:
-            #cv2.imshow('pedastrial',self.depth_image[150:250, 165:700])
+            #cv2.imshow('pedastrial',self.depth_image[150:250, 180:670])
             #self.lane_follow.just_follow(self, 0.0, 0.0)
-            self.get_logger().info(f'{np.min(self.depth_image[150:250, 165:700])}')
+            self.get_logger().info(f'{np.min(self.depth_image[150:250, 180:670])}')
 
-            if np.min(self.depth_image[150:250, 165:700]) > 0.3 and np.min(self.depth_image[150:250, 165:700]) != float('-inf'):
-                self.move_task(0.1, 0.2)
+            if np.min(self.depth_image[150:250, 180:670]) > 0.3 and np.min(self.depth_image[150:250, 180:670]) != float('-inf'):
+                self.move_task(0.35, 0.5)
                 self.lane_follow.start(self)
                 self.state_machine.set_state('just_follow')
 
@@ -628,23 +633,23 @@ class Robot(Node):
             if bbox[len(bbox)//2, len(bbox[0])//2] > 0.3: # скип если далеко
                 continue
 
-            elif box['label'] == 'T_crossroad' and box['conf'] > 0.90: #Развилка
+            elif box['label'] == 'T_crossroad' and box['conf'] > 0.85: #Развилка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('T_crossroad')
 
-            elif box['label'] == 'works_sign' and box['conf'] > 0.90: #Стены
+            elif box['label'] == 'works_sign' and box['conf'] > 0.85: #Стены
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('works_sign')
 
-            elif box['label'] == 'parking_sign' and box['conf'] > 0.90: #Парковка
+            elif box['label'] == 'parking_sign' and box['conf'] > 0.85: #Парковка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('parking_sign')
 
-            elif box['label'] == 'crossing_sign' and box['conf'] > 0.90: #Пешеходный переход
+            elif box['label'] == 'crossing_sign' and box['conf'] > 0.85: #Пешеходный переход
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('crossing_sign')
 
-            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.90: #Тунель
+            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.85: #Тунель
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('tunnel_sign', )
                 # self.get_logger().info(f"Now state is: {self.state_machine.get_state()} conf")
@@ -672,7 +677,7 @@ class LaneFollowing():
     def start(self, robot):
         self.is_stop = False
 
-    def just_follow(self, robot: Robot, speed=0.1, z_speed=1.0, hold_side=None):
+    def just_follow(self, robot: Robot, speed=0.1, z_speed=0.5, hold_side=None):
         if not self.is_stop:
             # Конвертация сообщения ROS в OpenCV изображение
             image = robot.cv_image
