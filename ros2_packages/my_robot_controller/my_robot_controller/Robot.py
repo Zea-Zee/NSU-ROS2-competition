@@ -16,7 +16,7 @@ import time
 # import threading
 
 
-YOLO_FPS = 4
+YOLO_FPS = 2
 PROCESS_FREQUENCY = 100
 
 
@@ -79,7 +79,8 @@ class StateMachine:
         if state not in self.states:
             log(self.log_node, f"You are trying to set incorrect state: {state}", 'CRITICAL_ERROR')
         index = self.name_to_index[state]
-        log(self.log_node, f'Transit from {self.current_state} to {state}', 'NEW_OBSTACLE')
+        if self.current_state != state:
+            log(self.log_node, f'Transit from {self.current_state} to {state}', 'NEW_OBSTACLE')
         self.current_state = self.states[index]
 
     def set_next_state(self, state):
@@ -123,7 +124,8 @@ class Robot(Node):
             self.state_machine.set_state(state)
 
         self.obstacles = {
-            'tunnel': TunnelObstacle()
+            'tunnel': TunnelObstacle(),
+            'parking': ParkingObstacle()
         }
 
         self.detector = Detector() # YOLOv11 detector of signs
@@ -605,8 +607,9 @@ class Robot(Node):
                         self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
                         # Функция прохождения лабиринта
                     case 'parking_sign':
-                        self.move_task(0.3)
-                        self.state_machine.set_state('just_follow') # Заглушка
+                        # self.move_task(0.3)
+                        self.state_machine.set_state('parking_sign') # Заглушка
+                        self.obstacles['parking'].process(self)
                     case 'crossing_sign':
                         self.lane_follow.just_follow(self, speed=0.0)
                         self.pedestrian_crossing()
@@ -628,7 +631,8 @@ class Robot(Node):
                 # TODO: сделать блокировку
                 self.boxes, self.yolo_image, _ = self.detector.process_image(self.cv_image)
                 self.check_for_state_transition(self.boxes)
-
+                cv2.imshow('YOLO', self.yolo_image)
+                cv2.waitKey(1)
         except Exception as e:
             pass
             #self.get_logger().error(
@@ -787,7 +791,7 @@ class LaneFollowing():
             # то же что и выше но картинка не после yolo а оригинальная
             # if image is not None and dst is not None:
             #     concatenated_image = np.vstack((image, dst))
-                cv2.imshow('Camera', concatenated_image)
+                cv2.imshow('Lane camera', concatenated_image)
                 cv2.waitKey(1)
 
 
@@ -889,3 +893,96 @@ class TunnelObstacle(Obstacle):
 
         except Exception as e:
             log(robot, f"Fail in TunnelObstacle.process: {e}", 'ERROR')
+
+
+class ParkingObstacle(Obstacle):
+    def __init__(self):
+        super().__init__()
+
+        self.state = 0
+        self.is_hummer_left = None
+
+    def process(self, robot: Robot):
+        try:
+            sectored_distances = robot.get_sectored_lidar()
+            odom = robot.get_normalized_odometry()
+
+            # log(robot, f"ODOM: {odom}", 'INFO')
+            match self.state:
+                case 0:
+                    log(robot, "Starting process PARKING", 'NEW_OBSTACLE')
+                    robot.move_task(0.475)
+                    self.state += 1
+                case 1:
+                    robot.rotate_task(np.pi / 2)
+                    self.state += 1
+                case 2:
+                    image_middle = robot.cv_image.shape[1] // 2
+                    for box in robot.boxes:
+                        if box['label'] == 'hummer_front':
+                            hummer_center_x = (box['x_min'] + box['x_max']) // 2
+                            if hummer_center_x >= image_middle:
+                                self.is_hummer_left = False
+                            else:
+                                self.is_hummer_left = True
+                    if self.is_hummer_left is not None:
+                        log(robot, f"Hummer is left: {self.is_hummer_left}", "GOOD_INFO")
+                        self.state += 1
+                case 3:
+                    robot.move_task(0.9)
+                    self.state += 1
+                case 4:
+                    if self.is_hummer_left is True:
+                        robot.rotate_task(-np.pi / 6)
+                    else:
+                        robot.rotate_task(np.pi / 6)
+                    self.state += 1
+                case 5:
+                    robot.move_task(0.2)
+                    self.state += 1
+                case 6:
+                    if self.is_hummer_left is True:
+                        robot.rotate_task(-2 * np.pi / 6)
+                    else:
+                        robot.rotate_task(2 * np.pi / 6)
+                    self.state += 1
+                case 7:
+                    robot.move_task(0.4)
+                    self.state += 1
+                case 8:
+                    if self.is_hummer_left is True:
+                        robot.rotate_task(-np.pi / 2)
+                    else:
+                        robot.rotate_task(np.pi / 2)
+                    self.state += 1
+
+                case 9:
+                    robot.move_task(0.1)
+                    self.state += 1
+                case 10:
+                    if self.is_hummer_left is True:
+                        robot.rotate_task(-np.pi / 2)
+                    else:
+                        robot.rotate_task(np.pi / 2)
+                    self.state += 1
+                case 11:
+                    robot.move_task(0.4)
+                    self.state += 1
+                case 12:
+                    if self.is_hummer_left is True:
+                        robot.rotate_task(np.pi / 2)
+                    else:
+                        robot.rotate_task(-np.pi / 2)
+                    self.state += 1
+                case 12:
+                    robot.move_task(0.8)
+                    self.state += 1
+                case 13:
+                    robot.rotate_task(np.pi / 2)
+                    self.state += 1
+
+                #log(robot, f"FINISH Error x: {err_x:.3f}, error y: {err_y:.3f}, error angle: {err_a:.4f}", 'GOOD_INFO')
+            return None
+
+        except Exception as e:
+            log(robot, f"Fail in ParkingObstacle.process: {e}", 'ERROR')
