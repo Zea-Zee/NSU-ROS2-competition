@@ -16,7 +16,7 @@ import time
 # import threading
 
 
-YOLO_FPXS = 3
+YOLO_FPS = 3
 PROCESS_FREQUENCY = 100
 
 
@@ -402,22 +402,22 @@ class Robot(Node):
             yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
             ang_speed = 3.14 / 32 if yaw <= 0 else -(3.14 / 32)
 
+            self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
+            
             if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1:
                 self.move(linear_x=0.0, angular_z=ang_speed)
             else:
                 self.move(linear_x=0.0, angular_z=0.0)
-                #self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
+                self.ped_can_move_flag = True
+        
+        if self.ped_can_move_flag:
+            cv2.imshow('pedastrial',self.depth_image[150:250, 165:700])
+            self.get_logger().info(f'{np.min(self.depth_image[150:250, 165:700])}')
 
-                #bbox = curr_depth_image[int(box['y_min']):int(box['y_max']), int(box['x_min']):int(box['x_max'])]
-                #cv2.imshow('pedastrial',self.depth_image[150:250, 165:700])
-                #self.get_logger().info(f'{np.min(self.depth_image[150:250, 165:700])}')
-
-                if np.min(self.depth_image[150:250, 165:700]):
-                    self.move(0.15, 0.0)
-                    time.sleep(1.5)
-                    self.move(0.0, 0.0)
-                    self.state_machine.set_state('just_follow')
-
+            if np.min(self.depth_image[150:250, 165:700]) > 0.3 and np.min(self.depth_image[150:250, 165:700]) != -np.inf:
+                self.move_task(0.15)
+                self.move(0.0, 0.0)
+                self.state_machine.set_state('just_follow')                    
 
     def move_task(self, distance, linear_x=0.15):
         """Дает задание для движения прямо ровно на заданную дистанцию.
@@ -558,9 +558,9 @@ class Robot(Node):
                     self.pedestrian_crossing()
                 case 'tunnel_sign':
                     self.obstacles['tunnel'].process(self)
-                case 'just_follow':
-                    if self.can_move:
-                        self.lane_follow.just_follow(self)
+                #case 'just_follow':
+                #    if self.can_move:
+                #        self.lane_follow.just_follow(self)
                 case _:
                     self.lane_follow.just_follow(self)
 
