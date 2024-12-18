@@ -388,7 +388,7 @@ class Robot(Node):
         #self.get_logger().info(f'\n\nPedastrial!!!')
         if not self.stop_flag:
             self.stop_flag = True
-            self.lane_follow.just_follow(self, hold_side='left')
+            self.lane_follow.just_follow(self)
             #self.get_logger().info(f'MOVE')
             for box in self.boxes:
                 if box['label'] == 'crossing_sign' and box['conf'] > 0.80:
@@ -397,26 +397,30 @@ class Robot(Node):
 
         #self.get_logger().info(f'STOP')
         if not self.ped_can_move_flag:
-            self.lane_follow.just_follow(self, speed=0.0, z_speed=0.0)
+            self.lane_follow.stop(self)
             x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
             yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-            ang_speed = 3.14 / 32 if yaw <= 0 else -(3.14 / 32)
+            ang_speed = 3.14 / 32
+            if yaw <= 0 or yaw >= 90:
+                ang_speed = -ang_speed 
+            #if yaw <= 0 else -(3.14 / 32)
 
             self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
             
-            if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1:
+            if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1:# or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
                 self.move(linear_x=0.0, angular_z=ang_speed)
             else:
                 self.move(linear_x=0.0, angular_z=0.0)
                 self.ped_can_move_flag = True
         
         if self.ped_can_move_flag:
-            cv2.imshow('pedastrial',self.depth_image[150:250, 165:700])
+            #cv2.imshow('pedastrial',self.depth_image[150:250, 165:700])
+            #self.lane_follow.just_follow(self, 0.0, 0.0)
             self.get_logger().info(f'{np.min(self.depth_image[150:250, 165:700])}')
 
-            if np.min(self.depth_image[150:250, 165:700]) > 0.3 and np.min(self.depth_image[150:250, 165:700]) != -np.inf:
-                self.move_task(0.15)
-                self.move(0.0, 0.0)
+            if np.min(self.depth_image[150:250, 165:700]) > 0.3 and np.min(self.depth_image[150:250, 165:700]) != float('-inf'):
+                self.move_task(0.1, 0.2)
+                self.lane_follow.start(self)
                 self.state_machine.set_state('just_follow')                    
 
     def move_task(self, distance, linear_x=0.15):
@@ -554,7 +558,7 @@ class Robot(Node):
                 case 'parking_sign':
                     self.state_machine.set_state('just_follow') # Заглушка
                 case 'crossing_sign':
-                    self.lane_follow.just_follow(self, speed=0.1, hold_side='left')
+                    self.lane_follow.just_follow(self, speed=0.0)
                     self.pedestrian_crossing()
                 case 'tunnel_sign':
                     self.obstacles['tunnel'].process(self)
@@ -634,101 +638,107 @@ class LaneFollowing():
         self.const1, self.const2 = (h_real, w_real+15), (h_real*3, w_real-15)
         # previous points
         self.prevpt1, self.prevpt2 = (h_real, w_real), (h_real*3, w_real)
+        self.is_stop = False
 
+    def stop(self, robot):
+        robot.move(linear_x=0.0, angular_z=0.0)
+        self.is_stop = True
+
+    def start(self, robot):
+        self.is_stop = False
+        
     def just_follow(self, robot: Robot, speed=0.15, z_speed=1.0, hold_side=None):
-        # Конвертация сообщения ROS в OpenCV изображение
-        image = robot.cv_image
-        condition = ((image[:, :, 2] > 220) & (
-            image[:, :, 1] > 220) & (image[:, :, 0] < 30))
-        image[condition] = 255
-        grays = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        if not self.is_stop:
+            # Конвертация сообщения ROS в OpenCV изображение
+            image = robot.cv_image
+            condition = ((image[:, :, 2] > 220) & (
+                image[:, :, 1] > 220) & (image[:, :, 0] < 30))
+            image[condition] = 255
+            grays = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # Увеличение контраста и бинаризация
-        grays[grays < 219] = 0
-        # grayd = grays + 100 - np.mean(grays)/3
-        _, gray = cv2.threshold(grays, 170, 255, cv2.THRESH_BINARY)
+            # Увеличение контраста и бинаризация
+            grays[grays < 219] = 0
+            # grayd = grays + 100 - np.mean(grays)/3
+            _, gray = cv2.threshold(grays, 170, 255, cv2.THRESH_BINARY)
 
-        # Обработка нижней трети изображения
-        height, width = gray.shape
-        dst = gray[2 * height // 3:, :]
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
+            # Обработка нижней трети изображения
+            height, width = gray.shape
+            dst = gray[2 * height // 3:, :]
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
 
-        dst = cv2.morphologyEx(dst, cv2.MORPH_CLOSE, kernel)
-        # Нахождение компонентов
-        num_labels, _, _, centroids = cv2.connectedComponentsWithStats(dst)
-        dst = cv2.cvtColor(dst, cv2.COLOR_GRAY2BGR)
-        if num_labels > 1:
-            mindistance1 = []
-            mindistance2 = []
+            dst = cv2.morphologyEx(dst, cv2.MORPH_CLOSE, kernel)
+            # Нахождение компонентов
+            num_labels, _, _, centroids = cv2.connectedComponentsWithStats(dst)
+            dst = cv2.cvtColor(dst, cv2.COLOR_GRAY2BGR)
+            if num_labels > 1:
+                mindistance1 = []
+                mindistance2 = []
 
-            for i in range(1, num_labels):
-                cv2.circle(dst, (int(centroids[i][0]), int(
-                    centroids[i][1])), 2, (0, 255, 0), 2)
-                centroid = centroids[i]
+                for i in range(1, num_labels):
+                    cv2.circle(dst, (int(centroids[i][0]), int(
+                        centroids[i][1])), 2, (0, 255, 0), 2)
+                    centroid = centroids[i]
 
-                # Расчёт расстояний до предыдущих точек
-                distance1 = abs(
-                    centroid[0] - (self.prevpt1[0] if self.prevpt1 else 0))
-                distance2 = abs(
-                    centroid[0] - (self.prevpt2[0] if self.prevpt2 else 0))
+                    # Расчёт расстояний до предыдущих точек
+                    distance1 = abs(
+                        centroid[0] - (self.prevpt1[0] if self.prevpt1 else 0))
+                    distance2 = abs(
+                        centroid[0] - (self.prevpt2[0] if self.prevpt2 else 0))
 
-                mindistance1.append(distance1)
-                mindistance2.append(distance2)
+                    mindistance1.append(distance1)
+                    mindistance2.append(distance2)
 
-            # Поиск минимальных расстояний
-            min_dist1 = min(mindistance1)
-            min_dist2 = min(mindistance2)
+                # Поиск минимальных расстояний
+                min_dist1 = min(mindistance1)
+                min_dist2 = min(mindistance2)
 
-            min_idx1 = mindistance1.index(min_dist1) + 1
-            min_idx2 = mindistance2.index(min_dist2) + 1
-            print(min_dist1)
-            # Определение новых точек
+                min_idx1 = mindistance1.index(min_dist1) + 1
+                min_idx2 = mindistance2.index(min_dist2) + 1
+                print(min_dist1)
+                # Определение новых точек
 
-            cpt1 = tuple(centroids[min_idx1]
-                         ) if min_dist1 < 100 else self.prevpt1
-            if hold_side == 'right':
-                cpt1 = self.const1
-            cpt2 = tuple(centroids[min_idx2]
-                         ) if min_dist2 < 100 else self.prevpt2
-            if hold_side == 'left':
-                cpt2 = self.const2
-        else:
-            # Если нет объектов, используем предыдущие точки
-            cpt1, cpt2 = self.prevpt1, self.prevpt2
+                cpt1 = tuple(centroids[min_idx1]
+                            ) if min_dist1 < 100 else self.prevpt1
+                if hold_side == 'right':
+                    cpt1 = self.const1
+                cpt2 = tuple(centroids[min_idx2]
+                            ) if min_dist2 < 100 else self.prevpt2
+                if hold_side == 'left':
+                    cpt2 = self.const2
+            else:
+                # Если нет объектов, используем предыдущие точки
+                cpt1, cpt2 = self.prevpt1, self.prevpt2
 
-        # Сохранение текущих точек
-        self.prevpt1, self.prevpt2 = cpt1, cpt2
+            # Сохранение текущих точек
+            self.prevpt1, self.prevpt2 = cpt1, cpt2
 
-        # Вычисление центральной точки
-        if cpt1 and cpt2:
-            fpt_x = int((cpt1[0] + cpt2[0]) / 2)
-            fpt_y = int((cpt1[1] + cpt2[1]) / 2) + 2 * height // 3
-        else:
-            fpt_x, fpt_y = width // 2, height
+            # Вычисление центральной точки
+            if cpt1 and cpt2:
+                fpt_x = int((cpt1[0] + cpt2[0]) / 2)
+                fpt_y = int((cpt1[1] + cpt2[1]) / 2) + 2 * height // 3
+            else:
+                fpt_x, fpt_y = width // 2, height
 
-        self.error = width // 2 - fpt_x
+            self.error = width // 2 - fpt_x
 
-        # Движение
-        if speed == 0.0 and z_speed == 0.0:
-            robot.move(linear_x=0.0, angular_z=0.0)
-        else:
+            # Движение
             robot.move(linear_x=speed, angular_z=(
                 self.error * 90.0 * z_speed / 400) / 15)
-        # Отображение результатов
+            # Отображение результатов
 
-        if cpt1 and cpt2:
-            cv2.circle(image, (fpt_x, fpt_y), 2, (0, 0, 255), 2)
-            cv2.circle(dst, (int(cpt1[0]), int(cpt1[1])), 2, (0, 0, 255), 2)
-            cv2.circle(dst, (int(cpt2[0]), int(cpt2[1])), 2, (255, 0, 0), 2)
+            if cpt1 and cpt2:
+                cv2.circle(image, (fpt_x, fpt_y), 2, (0, 0, 255), 2)
+                cv2.circle(dst, (int(cpt1[0]), int(cpt1[1])), 2, (0, 0, 255), 2)
+                cv2.circle(dst, (int(cpt2[0]), int(cpt2[1])), 2, (255, 0, 0), 2)
 
-        # Выводит склееное вертикально изображение из yolo и нахождение центра масс
-        if robot.yolo_image is not None and dst is not None:
-            concatenated_image = np.vstack((robot.yolo_image, dst))
-        # то же что и выше но картинка не после yolo а оригинальная
-        # if image is not None and dst is not None:
-        #     concatenated_image = np.vstack((image, dst))
-            cv2.imshow('Camera', concatenated_image)
-            cv2.waitKey(1)
+            # Выводит склееное вертикально изображение из yolo и нахождение центра масс
+            if robot.yolo_image is not None and dst is not None:
+                concatenated_image = np.vstack((robot.yolo_image, dst))
+            # то же что и выше но картинка не после yolo а оригинальная
+            # if image is not None and dst is not None:
+            #     concatenated_image = np.vstack((image, dst))
+                cv2.imshow('Camera', concatenated_image)
+                cv2.waitKey(1)
 
 
 # Класс-родитель препятствие в каждом из которых в process будет реализована логика прохождения препятствия
