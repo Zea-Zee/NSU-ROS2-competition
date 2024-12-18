@@ -16,7 +16,7 @@ import time
 # import threading
 
 
-YOLO_FPS = 3
+YOLO_FPS = 4
 PROCESS_FREQUENCY = 100
 
 
@@ -39,6 +39,8 @@ def log(node: Node, message: str, log_type: str='-'):
                 f"{Style.BRIGHT}{Fore.GREEN}{message}{Style.RESET_ALL}")
         case 'STEP':
             node.get_logger().info(f"{Fore.MAGENTA}{message}{Style.RESET_ALL}")
+        case 'NEW_OBSTACLE':
+            node.get_logger().info(f"{Style.BRIGHT}{Fore.BLUE}{message}{Style.RESET_ALL}")
         case 'WARN':
             node.get_logger().warn(f"{Fore.YELLOW}{message}{Style.RESET_ALL}")
         case 'BIG_WARN':
@@ -56,10 +58,11 @@ def log(node: Node, message: str, log_type: str='-'):
 
 
 class StateMachine:
-    def __init__(self, states):
+    def __init__(self, states, log_node):
         self.states = states
         self.current_state = states[0]
         self.name_to_index = {name: i for i, name in enumerate(states)}
+        self.log_node = log_node
         #self.curr_undex
 
     def increase_state(self):
@@ -74,8 +77,9 @@ class StateMachine:
 
     def set_state(self, state):
         if state not in self.states:
-            raise Exception(f"You are trying to set incorrect state {state}")
+            log(self.log_node, f"You are trying to set incorrect state: {state}", 'CRITICAL_ERROR')
         index = self.name_to_index[state]
+        log(self.log_node, f'Transit from {self.current_state} to {state}', 'NEW_OBSTACLE')
         self.current_state = self.states[index]
 
     def set_next_state(self, state):
@@ -112,7 +116,9 @@ class Robot(Node):
 
         # Создаем машину состояний состояющую из препятствий
         self.state_machine = StateMachine(
-            ['just_follow', 'traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign'])
+                ['just_follow', 'traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign'],
+                log_node=self
+            )
         if state is not None:
             self.state_machine.set_state(state)
 
@@ -402,17 +408,17 @@ class Robot(Node):
             yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
             ang_speed = 3.14 / 32
             if yaw <= 0 or yaw >= 90:
-                ang_speed = -ang_speed 
+                ang_speed = -ang_speed
             #if yaw <= 0 else -(3.14 / 32)
 
             self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
-            
+
             if np.degrees(yaw) >= 179 or np.degrees(yaw) <= -179: #or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
                 self.move(linear_x=0.0, angular_z=ang_speed)
             else:
                 self.move(linear_x=0.0, angular_z=0.0)
                 self.ped_can_move_flag = True
-        
+
         if self.ped_can_move_flag:
             #cv2.imshow('pedastrial',self.depth_image[150:250, 165:700])
             #self.lane_follow.just_follow(self, 0.0, 0.0)
@@ -421,7 +427,7 @@ class Robot(Node):
             if np.min(self.depth_image[150:250, 165:700]) > 0.3 and np.min(self.depth_image[150:250, 165:700]) != float('-inf'):
                 self.move_task(0.1, 0.2)
                 self.lane_follow.start(self)
-                self.state_machine.set_state('just_follow')                    
+                self.state_machine.set_state('just_follow')
 
     def move_task(self, distance, linear_x=0.15):
         """Дает задание для движения прямо ровно на заданную дистанцию.
@@ -442,6 +448,7 @@ class Robot(Node):
             'linear_v': linear_x,
             'angular_v': odom['angular_v']
         }
+        log(self, f"Registered move task for {distance} distance", 'INFO')
         self.move(linear_x=linear_x)
         self.current_task = 'move'
         # log(self, f"Cur odom: {odom}", 'INFO')
@@ -466,13 +473,14 @@ class Robot(Node):
             'linear_v': odom['linear_v'],
             'angular_v': angular_v
         }
+        log(self, f"Registered rotate task for {angle} distance", 'INFO')
         self.move(angular_z=angular_v)
         self.current_task = 'rotate'
         # log(self, f"Cur odom: {odom}", 'INFO')
         # log(self, f"Target odom: {self.target_odom}", 'INFO')
         return 0
 
-    def is_task_completed(self, epsilon=0.01, min_v=0.025, max_v=1.25, min_w=np.pi / 8, max_w=np.pi / 3):
+    def is_task_completed(self, epsilon=0.01, min_v=0.025, max_v=1.25, min_w=np.pi / 8, max_w=np.pi / 3, safe_mode=True):
         """Проверяет выполнено ли задание, возвращает ответ, регулирует скорость.
             Должна первоочередно вызываться в robot.process_mode() для правильной обработки заданий.
 
@@ -493,11 +501,23 @@ class Robot(Node):
         err_a = self.target_odom['orient'] - odom['orient']
         # log(self, f"Cur odom: {odom}", 'INFO')
         # log(self, f"Error x: {err_x:.3f}, error y: {err_y:.3f}, error angle: {err_a:.4f}", 'WARN')
+        if safe_mode is True:
+            distances = self.get_sectored_lidar()
 
         if self.current_task == 'move':
+            if safe_mode:
+                if min(distances[-1], distances[0], distances[1]) < 0.15:
+                    self.current_task = None
+                    self.target_odom = None
+                    self.move(0.0, 0.0)
+                    log(self, "!UNSAFE DISTANCE! Finished move task", 'ERROR')
+                    log(self, f"Distances were: {[distances[-1], distances[0], distances[1]]}")
+                    time.sleep(0.1)
+                    return True
             if abs(err_x) < epsilon and abs(err_y) < epsilon:
                 self.current_task = None
                 self.target_odom = None
+                log(self, "Finished move task", 'INFO')
                 self.move(0.0, 0.0)
                 time.sleep(0.1)
                 return True
@@ -508,6 +528,7 @@ class Robot(Node):
             if abs(err_a) < epsilon / 8:
                 self.current_task = None
                 self.target_odom = None
+                log(self, f"Finished rotate task", 'INFO')
                 self.move(0.0, 0.0)
                 time.sleep(0.1)
                 return True
@@ -519,55 +540,60 @@ class Robot(Node):
     # Main function
 
     def process_mode(self):
-        # Проверка загрузились ли все датчики
-        if self.fully_initialized is False:
-            if (
-                self.get_lidar() is not None and
-                self.get_depth() is not None and
-                self.get_image() is not None and
-                self.get_odometry()
-            ):
-                log(self,
-                    f"Robot interface initialized with state {self.state_machine.get_state()}", "GOOD_INFO")
-                self.fully_initialized = True
-            else:
-                return None
+        try:
+            # Проверка загрузились ли все датчики
+            if self.fully_initialized is False:
+                if (
+                    self.get_lidar() is not None and
+                    self.get_depth() is not None and
+                    self.get_image() is not None and
+                    self.get_odometry() is not None and
+                    self.yolo_image is not None
+                ):
+                    time.sleep(1)   #TODO: убрать, но пока пусть спит перед стартом тормоз ебаный
+                    log(self,
+                        f"Robot interface initialized with state {self.state_machine.get_state()}", "GOOD_INFO")
+                    self.fully_initialized = True
+                else:
+                    return None
 
-        # Проверка выполнения задания
-        if self.current_task is not None:
-            if not self.is_task_completed():
-                return None
-                
-        elif self.cv_image is not None:
-            self.lane_follow.just_follow(self)
-        # if random.randint(0, 10) == 1:
-            # self.get_logger().info(f"Lane was processed for {time.time() - start_time}s")
+            # Проверка выполнения задания
+            if self.current_task is not None:
+                if not self.is_task_completed():
+                    return None
 
-            self.mode = self.state_machine.get_state()
-            #self.get_logger().info(f'{self.mode}')
+            elif self.cv_image is not None:
+                # self.lane_follow.just_follow(self)
+            # if random.randint(0, 10) == 1:
+                # self.get_logger().info(f"Lane was processed for {time.time() - start_time}s")
 
-            #['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign', 'just_follow']
-            match (self.mode):
-                case 'traffic_light':
-                    self.obey_traffic_lights()
-                case 'T_crossroad':
-                    self.T_cross_road()
-                case 'works_sign':
-                    self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
-                    # Функция прохождения лабиринта
-                case 'parking_sign':
-                    self.move_task(0.3)
-                    self.state_machine.set_state('just_follow') # Заглушка
-                case 'crossing_sign':
-                    self.lane_follow.just_follow(self, speed=0.0)
-                    self.pedestrian_crossing()
-                case 'tunnel_sign':
-                    self.obstacles['tunnel'].process(self)
-                #case 'just_follow':
-                #    if self.can_move:
-                #        self.lane_follow.just_follow(self)
-                case _:
-                    self.lane_follow.just_follow(self)
+                self.mode = self.state_machine.get_state()
+                #self.get_logger().info(f'{self.mode}')
+
+                #['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign', 'just_follow']
+                match (self.mode):
+                    case 'traffic_light':
+                        self.obey_traffic_lights()
+                    case 'T_crossroad':
+                        self.T_cross_road()
+                    case 'works_sign':
+                        self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
+                        # Функция прохождения лабиринта
+                    case 'parking_sign':
+                        self.move_task(0.3)
+                        self.state_machine.set_state('just_follow') # Заглушка
+                    case 'crossing_sign':
+                        self.lane_follow.just_follow(self, speed=0.0)
+                        self.pedestrian_crossing()
+                    case 'tunnel_sign':
+                        self.obstacles['tunnel'].process(self)
+                    #case 'just_follow':
+                    #    if self.can_move:
+                    #        self.lane_follow.just_follow(self)
+                    case _:
+                        self.lane_follow.just_follow(self)
+        except Exception as e:
+            log(self, f"Robot.process_mode(): {e}", "CRITICAL_ERROR")
 
     # Запуск детектора yolo
     def run_detector(self) -> None:
@@ -620,14 +646,12 @@ class Robot(Node):
 
             elif box['label'] == 'tunnel_sign' and box['conf'] > 0.90: #Тунель
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
-                self.state_machine.set_state('tunnel_sign')
+                self.state_machine.set_state('tunnel_sign', )
+                # self.get_logger().info(f"Now state is: {self.state_machine.get_state()} conf")
 
             else:
                 pass
 
-            # if box['label'] == 'tunnel_sign' and box['conf'] > 0.80:# and self.state_machine.set_next_state('tunnel'):
-                # self.get_logger().info("States was updated to tunnel by")
-                # self.get_logger().info(f"{box['conf']} conf and {box['area']} area")
 
 # Class for lane following code
 class LaneFollowing():
@@ -647,8 +671,8 @@ class LaneFollowing():
 
     def start(self, robot):
         self.is_stop = False
-        
-    def just_follow(self, robot: Robot, speed=0.15, z_speed=1.0, hold_side=None):
+
+    def just_follow(self, robot: Robot, speed=0.1, z_speed=1.0, hold_side=None):
         if not self.is_stop:
             # Конвертация сообщения ROS в OpenCV изображение
             image = robot.cv_image
@@ -794,7 +818,7 @@ class TunnelObstacle(Obstacle):
         max_left_index = math.ceil(np.degrees(left_range) / sector_step)     # сколько индексов слева можем рассматривать
         max_right_index = math.ceil(np.degrees(right_range) / sector_step)   # сколько индексов слева можем рассматривать
         for i, distance in enumerate(distances):
-            if i > max_left_index and i < (sectors - max_right_index):
+            if i >= max_left_index and i <= (sectors - max_right_index):
                 continue
             if distance > max_dst and distance < 10:
                 max_dst = distance
@@ -803,12 +827,13 @@ class TunnelObstacle(Obstacle):
             self.angle_diff = -np.radians((sectors - max_i) * sector_step)
         else:
             self.angle_diff = np.radians(max_i * sector_step)
+        # log(robot, f"Sectors: {sectors}, max_i: {max_i}, sector_step: {sector_step}", 'WARN')
         self.distance_diff = max_dst * 0.5
-        # log(robot, f"-----------------------------------", 'GOOD_INFO')
-        # log(robot, f"Cur odom: {odom}", 'GOOD_INFO')
-        # log(robot, f"Angle diff: {self.angle_diff}", 'GOOD_INFO')
-        # log(robot, f"Distance diff: {self.distance_diff}", 'GOOD_INFO')
-        # log(robot, f"l_range: {left_range}, r_range: {right_range}, max_left_idx: {max_left_index}, max_right_idx: {max_right_index}, max_idx: {max_i}", 'GOOD_INFO')
+        log(robot, f"-----------------------------------", 'GOOD_INFO')
+        log(robot, f"Cur odom: {odom}", 'GOOD_INFO')
+        log(robot, f"Angle diff: {self.angle_diff}", 'GOOD_INFO')
+        log(robot, f"Distance diff: {self.distance_diff}", 'GOOD_INFO')
+        log(robot, f"l_range: {left_range}, r_range: {right_range}, max_left_idx: {max_left_index}, max_right_idx: {max_right_index}, max_idx: {max_i}", 'GOOD_INFO')
 
     def process(self, robot: Robot):
         try:
@@ -818,12 +843,13 @@ class TunnelObstacle(Obstacle):
             # log(robot, f"ODOM: {odom}", 'INFO')
             match self.state:
                 case 0:
+                    log(robot, "Starting process TUNNEL", 'NEW_OBSTACLE')
                     # Фиксируем углы крайней правой и крайней левой стены относительно робота.
                     self.min_rad = odom['orient']
                     self.max_rad = odom['orient'] + np.pi / 2
                     # log(robot, f"Min rad: {self.min_rad} Max rad: {self.max_rad} Cur rad: {odom['orient']}", 'GOOD_INFO')
                     self.state += 1
-                    robot.move_task(0.25)
+                    robot.move_task(0.75)
                 case 1:
                     # Повернемся по направлению где наибольшая дистанция
                     self.filter_lidar_angles(sectored_distances, odom, robot)
