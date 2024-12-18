@@ -391,7 +391,7 @@ class Robot(Node):
             self.lane_follow.just_follow(self)
             #self.get_logger().info(f'MOVE')
             for box in self.boxes:
-                if box['label'] == 'crossing_sign' and box['conf'] > 0.80:
+                if box['label'] == 'crossing_sign' and box['conf'] > 0.50:
                     self.stop_flag = False
             return
 
@@ -407,7 +407,7 @@ class Robot(Node):
 
             self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
             
-            if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1:# or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
+            if np.degrees(yaw) >= 179 or np.degrees(yaw) <= -179: #or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
                 self.move(linear_x=0.0, angular_z=ang_speed)
             else:
                 self.move(linear_x=0.0, angular_z=0.0)
@@ -556,6 +556,7 @@ class Robot(Node):
                     self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
                     # Функция прохождения лабиринта
                 case 'parking_sign':
+                    self.move_task(0.3)
                     self.state_machine.set_state('just_follow') # Заглушка
                 case 'crossing_sign':
                     self.lane_follow.just_follow(self, speed=0.0)
