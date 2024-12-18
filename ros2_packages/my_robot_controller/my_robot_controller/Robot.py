@@ -1,8 +1,9 @@
 import cv2
 import rclpy
 import time
-from colorama import Fore, Style
+from colorama import Fore, Style, init as colorama_init
 import random
+import math
 
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
@@ -15,8 +16,43 @@ import time
 # import threading
 
 
-YOLO_FPS = 3
+YOLO_FPXS = 3
 PROCESS_FREQUENCY = 100
+
+
+def log(node: Node, message: str, log_type: str='-'):
+    """Кастомный логгер.
+
+    Args:
+        node (Node): Нода из которой будет сообщение
+        message (str): Сообщение
+        log_type (str, optional): Тип сообщения (цвет и сообщение в росе) (INFO, GOOD_INFO, WARN, BIG_WARN, ERROR, CRITICAL_ERROR)
+
+    Returns:
+        int: 1 if was not success else 0
+    """
+    match log_type:
+        case 'INFO':
+            node.get_logger().info(f"{Fore.GREEN}{message}{Style.RESET_ALL}")
+        case 'GOOD_INFO':
+            node.get_logger().info(
+                f"{Style.BRIGHT}{Fore.GREEN}{message}{Style.RESET_ALL}")
+        case 'STEP':
+            node.get_logger().info(f"{Fore.MAGENTA}{message}{Style.RESET_ALL}")
+        case 'WARN':
+            node.get_logger().warn(f"{Fore.YELLOW}{message}{Style.RESET_ALL}")
+        case 'BIG_WARN':
+            node.get_logger().warn(
+                f"{Style.BRIGHT}{Fore.YELLOW}{message}{Style.RESET_ALL}")
+        case 'ERROR':
+            node.get_logger().error(f"{Fore.RED}{message}{Style.RESET_ALL}")
+        case 'CRITICAL_ERROR':
+            node.get_logger().error(
+                f"{Style.BRIGHT}{Fore.RED}{message}{Style.RESET_ALL}")
+        case _:
+            node.get_logger().info(message)
+            return 1
+    return 0
 
 
 class StateMachine:
@@ -64,7 +100,6 @@ class StateMachine:
 class Robot(Node):
     def __init__(self, mode: str = 'auto', state: str = None, camera=None, odom=None, twist=None):
         super().__init__("moving_robot")
-
         # Аргумент изначально будет приходить из параметров запуска, чтобы можно было управлять вручную
         modes = [
             'auto',
@@ -73,12 +108,14 @@ class Robot(Node):
         if mode not in modes:
             mode = 'auto'
 
+        self.fully_initialized = False
+
         # Создаем машину состояний состояющую из препятствий
         self.state_machine = StateMachine(
             ['just_follow', 'traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign'])
         if state is not None:
             self.state_machine.set_state(state)
-        
+
         self.obstacles = {
             'tunnel': TunnelObstacle()
         }
@@ -95,7 +132,7 @@ class Robot(Node):
         # information about robot position and speed
         self.position = None
         self.orientation = None
-        
+
         self.can_move = True #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
         self.side = None
         self.linear_velocity = None
@@ -116,15 +153,19 @@ class Robot(Node):
         self.bridge = CvBridge()
 
         # subscribers functions
+        # Переменные для выполнения заданий движения
+        self.current_task = None
+        self.target_odom = None
+
         self.create_subscription(
-            Image, 
-            '/color/image', 
-            self._camera_callback, 
+            Image,
+            '/color/image',
+            self._camera_callback,
             10)
         self.create_subscription(
-            Odometry, 
-            '/odom', 
-            self._odom_callback, 
+            Odometry,
+            '/odom',
+            self._odom_callback,
             10)
         self.create_subscription(
             Image,
@@ -147,8 +188,6 @@ class Robot(Node):
         self.create_timer(1.0 / PROCESS_FREQUENCY, self.process_mode)
         # Таймер для детектора, по которому закидываются картинки
         self.create_timer(1.0 / YOLO_FPS, self.run_detector)
-
-        self.get_logger().info('Robot interface initialized')
     """
     This block is for sensors callback
     Just look to next block for aviable functions
@@ -186,6 +225,45 @@ class Robot(Node):
     def get_lidar(self):
         return self.lidar_scan
 
+    def get_sectored_lidar(self):
+        """ Разделение лидара на сектора, сейчас 18 секторов по 20 градусов.
+            Сектора оцентрованы (нулевой сектор включает в себя углы от -10 до +10 от направления робота).
+            Для каждого сектора выводится одно (минимальное) значение.
+            Углы идут против часовой стрелки, то есть прямо - 0, лево ~ 5, зад 9, право 13, кстати косяк надо чтобы делилось на 4:(
+
+            #TODO возможно в будущем сделать настройку чтобы задвать размер сектора в аргументе
+
+        Returns:
+            list[float]: Список из минимальных расстояний для каждого из 18 секторов.
+        """
+        try:
+            distances = self.lidar_scan.ranges
+            normalized_distances = np.nan_to_num(
+                distances, nan=0, posinf=10, neginf=0)
+
+            sector_step = 20
+            window_radius = 10
+            # Рассчитываем усредненные значения для каждого сектора
+            sectored_distances = []
+            for center_index in range(0, 360, sector_step):
+                # Определяем границы окна
+                start_index = (center_index - window_radius) % 360
+                end_index = (center_index + window_radius + 1) % 360
+                # Собираем подмассив
+                if start_index < end_index:
+                    window = normalized_distances[start_index:end_index]
+                else:
+                    window = np.concatenate(
+                        (normalized_distances[start_index:], normalized_distances[:end_index]))
+                # Берем среднее из трех наименьших значений
+                # mean_of_smallest = np.mean(np.partition(window, 2)[:3])
+                # sectored_distances.append(mean_of_smallest)
+                # Берем наименьшее
+                sectored_distances.append(min(window))
+            return sectored_distances
+        except Exception as e:
+            log(self, F"Error in robot.get_sectored_lidar: {e}", 'ERROR')
+
     def get_depth(self):
         return self.depth_image
 
@@ -200,6 +278,43 @@ class Robot(Node):
             'angular_velocity': self.angular_velocity,
         }
 
+    def get_normalized_odometry(self) -> dict:
+        """Берет и обрабатывает значения из топика одометрии приводя к нормальному виду.
+
+        Returns:
+            dict: {
+                pos: (x, y) точка где робот находится относительно момента спавна,
+                orient: z градус в радианах от момента спавна
+                linear_v: текущая скорость по прямой (не проверял насколько правильно работает)
+                angular_v: текущая скорость вращения (не проверял насколько правильно работает)
+            }
+        """
+        try:
+            odom = self.get_odometry()
+
+            # Переводим блядские кватернионы в радианы
+            def quaternion_to_z_angle(q):
+                # q is a quaternion [x, y, z, w]
+                w = q[3]
+                theta = 2 * np.arccos(w)
+                return theta
+            q = [
+                    odom['orientation'].x,
+                    odom['orientation'].y,
+                    odom['orientation'].z,
+                    odom['orientation'].w
+            ]
+            z = quaternion_to_z_angle(q)
+
+            normalized_odom = {
+                'pos': (odom['position'].x, odom['position'].y),
+                'orient': z,
+                'linear_v': odom['linear_velocity'].x,
+                'angular_v': odom['angular_velocity'].z
+            }
+            return normalized_odom
+        except Exception as e:
+            log(self, f"Error in robot.get_normalized_odometry: {e}", 'ERROR')
 
     """
     This block of code is for your code and etc.
@@ -213,9 +328,9 @@ class Robot(Node):
         cmd.angular.z = angular_z
         self.cmd_vel_publisher.publish(cmd)
         # self.get_logger().info(f"Command sent: linear_x={linear_x}, angular_z={angular_z}")
-    
-    
-            
+
+
+
     # traffic_lights moving
     def obey_traffic_lights(self):
         # additional function
@@ -227,7 +342,7 @@ class Robot(Node):
                     if box['label'].startswith('traffic'):
                         return box['label']
             return 'None'
-        
+
         traffic_light_color = get_traffic_box(self.boxes)
 
         if traffic_light_color.endswith('green') and not self.can_move:
@@ -251,7 +366,7 @@ class Robot(Node):
                         if box['label'].startswith('right') or box['label'].startswith('left'):
                             return box['label']
             return None
-        
+
         side = get_cross_road(self.boxes)
         angular_z = 1
         cross_speed = 0.165
@@ -262,7 +377,7 @@ class Robot(Node):
                 self.side = side
             if side == 'left':
                 angular_z = 0.8
-            
+
         if side is None:
             if self.side == 'right':
                 angular_z = 0.8
@@ -304,9 +419,131 @@ class Robot(Node):
                     self.state_machine.set_state('just_follow')
 
 
+    def move_task(self, distance, linear_x=0.15):
+        """Дает задание для движения прямо ровно на заданную дистанцию.
+
+        Args:
+            distance (_type_): Дистанция сколько должен проехать в текущем направлении
+            linear_x (float, optional): Начальная скорость (ни на что не влияет, #TODO:убрать). Defaults to 0.15.
+
+        Returns:
+            _type_: Просто ноль, #TODO:Убрать.
+        """
+        odom = self.get_normalized_odometry()
+        new_x = odom['pos'][0] + np.cos(odom['orient']) * distance
+        new_y = odom['pos'][1] + np.sin(odom['orient']) * distance
+        self.target_odom = {
+            'pos': (new_x, new_y),
+            'orient': odom['orient'],
+            'linear_v': linear_x,
+            'angular_v': odom['angular_v']
+        }
+        self.move(linear_x=linear_x)
+        self.current_task = 'move'
+        # log(self, f"Cur odom: {odom}", 'INFO')
+        # log(self, f"Target odom: {self.target_odom}", 'INFO')
+        return 0
+
+    def rotate_task(self, angle, angular_v=np.pi / 2):
+        """Дает задание для поворота ровно на заданное количество радиан.
+
+        Args:
+            angle (_type_): Радианы для поворота
+            angular_v (_type_, optional): Начальная скорость (ни на что не влияет, #TODO:убрать). Defaults to np.pi/2.
+
+        Returns:
+            _type_: Просто ноль, #TODO:Убрать.
+        """
+        odom = self.get_normalized_odometry()
+        new_orient = odom['orient'] + angle
+        self.target_odom = {
+            'pos': odom['pos'],
+            'orient': new_orient,
+            'linear_v': odom['linear_v'],
+            'angular_v': angular_v
+        }
+        self.move(angular_z=angular_v)
+        self.current_task = 'rotate'
+        # log(self, f"Cur odom: {odom}", 'INFO')
+        # log(self, f"Target odom: {self.target_odom}", 'INFO')
+        return 0
+
+    def is_task_completed(self, epsilon=0.01, min_v=0.025, max_v=1.25, min_w=np.pi / 8, max_w=np.pi / 3):
+        """Проверяет выполнено ли задание, возвращает ответ, регулирует скорость.
+            Должна первоочередно вызываться в robot.process_mode() для правильной обработки заданий.
+
+        Args:
+            epsilon (float, optional): Точность для линейных заданий, epsilon / 8 для вращательных заданий. Defaults to 0.01.
+            min_v (float, optional): #TODO:убрать. Defaults to 0.025.
+            max_v (float, optional): Стандартная линейная скорость, которая умножается на величину ошибки между целевыми координатами и текущими. Defaults to 1.25.
+            min_w (_type_, optional): #TODO:убрать.. Defaults to np.pi/8.
+            max_w (_type_, optional): Стандартная скорость вращения, которая умножается на величину ошибки между целевым радианом и текущим. Defaults to np.pi/3.
+
+        Returns:
+            _type_: True если задание выполнены, иначе False
+        """
+        odom = self.get_normalized_odometry()
+
+        err_x = max(self.target_odom['pos'][0], odom['pos'][0]) - min(self.target_odom['pos'][0], odom['pos'][0])
+        err_y = max(self.target_odom['pos'][1], odom['pos'][1]) - min(self.target_odom['pos'][1], odom['pos'][1])
+        err_a = self.target_odom['orient'] - odom['orient']
+        # log(self, f"Cur odom: {odom}", 'INFO')
+        # log(self, f"Error x: {err_x:.3f}, error y: {err_y:.3f}, error angle: {err_a:.4f}", 'WARN')
+
+        if self.current_task == 'move':
+            if abs(err_x) < epsilon and abs(err_y) < epsilon:
+                self.current_task = None
+                self.target_odom = None
+                self.move(0.0, 0.0)
+                time.sleep(0.1)
+                return True
+            new_v = max(err_x, err_y) * max_v
+            self.move(linear_x=new_v)
+            return False
+        elif self.current_task == 'rotate':
+            if abs(err_a) < epsilon / 8:
+                self.current_task = None
+                self.target_odom = None
+                self.move(0.0, 0.0)
+                time.sleep(0.1)
+                return True
+            new_w = err_a * max_w
+            self.move(angular_z=new_w)
+            return False
+        return False
+
     # Main function
+
     def process_mode(self):
-        if self.cv_image is not None:
+        # Проверка загрузились ли все датчики
+        if self.fully_initialized is False:
+            if (
+                self.get_lidar() is not None and
+                self.get_depth() is not None and
+                self.get_image() is not None and
+                self.get_odometry()
+            ):
+                log(self,
+                    f"Robot interface initialized with state {self.state_machine.get_state()}", "GOOD_INFO")
+                self.fully_initialized = True
+            else:
+                return None
+
+        # Проверка выполнения задания
+        if self.current_task is not None:
+            if not self.is_task_completed():
+                return None
+
+        # Обработчики препятствий
+        # start_time = time.time()
+        if self.state_machine.get_state() == 'tunnel':
+            # self.get_logger().info(f"goind to tunnel processor")
+            self.obstacles['tunnel'].process(self)
+
+        elif self.cv_image is not None:
+            self.lane_follow.just_follow(self)
+        # if random.randint(0, 10) == 1:
+            # self.get_logger().info(f"Lane was processed for {time.time() - start_time}s")
 
             self.mode = self.state_machine.get_state()
             #self.get_logger().info(f'{self.mode}')
@@ -319,7 +556,7 @@ class Robot(Node):
                     self.T_cross_road()
                 case 'works_sign':
                     self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
-                    # Функция прохождения лабиринта 
+                    # Функция прохождения лабиринта
                 case 'parking_sign':
                     self.state_machine.set_state('just_follow') # Заглушка
                 case 'crossing_sign':
@@ -373,19 +610,19 @@ class Robot(Node):
             elif box['label'] == 'works_sign' and box['conf'] > 0.90: #Стены
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('works_sign')
-            
+
             elif box['label'] == 'parking_sign' and box['conf'] > 0.90: #Парковка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('parking_sign')
-            
+
             elif box['label'] == 'crossing_sign' and box['conf'] > 0.90: #Пешеходный переход
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('crossing_sign')
-            
+
             elif box['label'] == 'tunnel_sign' and box['conf'] > 0.90: #Тунель
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('tunnel_sign')
-            
+
             else:
                 pass
 
@@ -454,11 +691,11 @@ class LaneFollowing():
             # Определение новых точек
 
             cpt1 = tuple(centroids[min_idx1]
-                         ) if min_dist1 < 100 else self.prevpt1 
+                         ) if min_dist1 < 100 else self.prevpt1
             if hold_side == 'right':
                 cpt1 = self.const1
             cpt2 = tuple(centroids[min_idx2]
-                         ) if min_dist2 < 100 else self.prevpt2 
+                         ) if min_dist2 < 100 else self.prevpt2
             if hold_side == 'left':
                 cpt2 = self.const2
         else:
@@ -502,17 +739,97 @@ class LaneFollowing():
 
 # Класс-родитель препятствие в каждом из которых в process будет реализована логика прохождения препятствия
 class Obstacle:
-    def __init__(self, name: str):
-        self.name = name
+    def __init__(self):
+        return None
 
     def process(self, robot: Robot):
         return None
 
 # Класс препятствия для туннеля
+
+
 class TunnelObstacle(Obstacle):
     def __init__(self):
-        super().__init__('tunnel')
+        super().__init__()
+        self.min_wall_distance = 0.175
+        self.min_obstacle_distance = 0.2
+        self.max_speed = 0.15
+        self.max_rad_speed = 1.07
+
+        self.min_rad = None
+        self.max_rad = None
+        self.angle_diff = None
+        self.distance_diff = None
+
+        self.state = 0
+
+    def filter_lidar_angles(self, distances, odom, robot=None):
+        """Берет дистанции с лидара, и задает угол для поворота по направлению к самому дальнему месту, также задает половину от расстояния к этому месту.
+            Логика такая, что у нас на шаге 0 алгоритма были зафикисрованы углы правой и левой стены (между ними 90 градусов) и
+            мы максимальные расстояния с лидаров будем брать только с тех секторов лидара, которые не выходят из этого разрешенного диапазона радиан.
+            Таким образом робот все время будет двигаться туда, где максимальная дистанция, засчет того что он никогда не развернется назад,
+            он точно прибудет к выходу туннеля.
+            Также стоит отметить что сектора у которых расстояние 10 не берутся, так как мы при предобработке лидара posinf превращаем в 10,
+            => мы не можем ехать в те направления так как это пустота (дырка в туннеле передает привет от Кудинова)
+
+        Args:
+            distances (_type_): Сектора из лидара.
+            odom (_type_): Нормализованная одометрия.
+            robot (_type_, optional): объект робота для логгиррвания. Defaults to None.
+        """
+        sector_step = 20
+        sectors = 18
+        max_i = -1
+        max_dst = -1
+
+        orient = odom['orient']
+        left_range = self.max_rad - orient      # на сколько радиан слева можем повернуть
+        right_range = orient - self.min_rad     # на сколько радиан справа можем повернуть
+
+        max_left_index = math.ceil(np.degrees(left_range) / sector_step)     # сколько индексов слева можем рассматривать
+        max_right_index = math.ceil(np.degrees(right_range) / sector_step)   # сколько индексов слева можем рассматривать
+        for i, distance in enumerate(distances):
+            if i > max_left_index and i < (sectors - max_right_index):
+                continue
+            if distance > max_dst and distance < 10:
+                max_dst = distance
+                max_i = i
+        if max_i > (sectors / 2):
+            self.angle_diff = -np.radians((sectors - max_i) * sector_step)
+        else:
+            self.angle_diff = np.radians(max_i * sector_step)
+        self.distance_diff = max_dst * 0.5
+        # log(robot, f"-----------------------------------", 'GOOD_INFO')
+        # log(robot, f"Cur odom: {odom}", 'GOOD_INFO')
+        # log(robot, f"Angle diff: {self.angle_diff}", 'GOOD_INFO')
+        # log(robot, f"Distance diff: {self.distance_diff}", 'GOOD_INFO')
+        # log(robot, f"l_range: {left_range}, r_range: {right_range}, max_left_idx: {max_left_index}, max_right_idx: {max_right_index}, max_idx: {max_i}", 'GOOD_INFO')
 
     def process(self, robot: Robot):
-        robot.move(linear_x=0.01)
-        robot.get_logger().info(f"lidar shape: {robot.get_lidar()}")
+        try:
+            sectored_distances = robot.get_sectored_lidar()
+            odom = robot.get_normalized_odometry()
+
+            # log(robot, f"ODOM: {odom}", 'INFO')
+            match self.state:
+                case 0:
+                    # Фиксируем углы крайней правой и крайней левой стены относительно робота.
+                    self.min_rad = odom['orient']
+                    self.max_rad = odom['orient'] + np.pi / 2
+                    # log(robot, f"Min rad: {self.min_rad} Max rad: {self.max_rad} Cur rad: {odom['orient']}", 'GOOD_INFO')
+                    self.state += 1
+                    robot.move_task(0.25)
+                case 1:
+                    # Повернемся по направлению где наибольшая дистанция
+                    self.filter_lidar_angles(sectored_distances, odom, robot)
+                    robot.rotate_task(self.angle_diff)
+                    self.state += 1
+                case 2:
+                    # Проедем половину наибольшей дистанции и вернемся к предыдущему шагу
+                    robot.move_task(self.distance_diff)
+                    self.state -= 1
+                #     log(robot, f"FINISH Error x: {err_x:.3f}, error y: {err_y:.3f}, error angle: {err_a:.4f}", 'GOOD_INFO')
+            return None
+
+        except Exception as e:
+            log(robot, f"Fail in TunnelObstacle.process: {e}", 'ERROR')
