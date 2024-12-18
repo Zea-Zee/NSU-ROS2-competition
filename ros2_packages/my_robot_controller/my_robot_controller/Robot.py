@@ -395,6 +395,7 @@ class Robot(Node):
         self.lane_follow.just_follow(self, speed=cross_speed, z_speed=angular_z, hold_side=self.side)
 
     def pedestrian_crossing(self):
+        #cv2.imshow('pedastrial',self.depth_image[200:220, 230:670])
         #self.lane_follow.just_follow(self, speed=0.1)
         #self.get_logger().info(f'\n\nPedastrial!!!')
         if not self.stop_flag:
@@ -427,10 +428,11 @@ class Robot(Node):
         if self.ped_can_move_flag:
             #cv2.imshow('pedastrial',self.depth_image[150:250, 180:670])
             #self.lane_follow.just_follow(self, 0.0, 0.0)
-            self.get_logger().info(f'{np.min(self.depth_image[150:250, 180:670])}')
+            self.get_logger().info(f'{np.min(self.depth_image[200:220, 230:670])}')
 
-            if np.min(self.depth_image[150:250, 180:670]) > 0.3 and np.min(self.depth_image[150:250, 180:670]) != float('-inf'):
+            if np.min(self.depth_image[200:220, 230:670]) > 0.3 and np.min(self.depth_image[200:220, 230:670]) != float('-inf'):
                 self.move_task(0.35, 0.5)
+                #self.rotate_task(-np.pi/2)
                 self.lane_follow.start(self)
                 self.state_machine.set_state('just_follow')
 
