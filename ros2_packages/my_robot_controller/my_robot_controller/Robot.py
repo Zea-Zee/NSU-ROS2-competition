@@ -533,13 +533,7 @@ class Robot(Node):
         if self.current_task is not None:
             if not self.is_task_completed():
                 return None
-
-        # Обработчики препятствий
-        # start_time = time.time()
-        if self.state_machine.get_state() == 'tunnel':
-            # self.get_logger().info(f"goind to tunnel processor")
-            self.obstacles['tunnel'].process(self)
-
+                
         elif self.cv_image is not None:
             self.lane_follow.just_follow(self)
         # if random.randint(0, 10) == 1:
@@ -563,7 +557,7 @@ class Robot(Node):
                     self.lane_follow.just_follow(self, speed=0.1, hold_side='left')
                     self.pedestrian_crossing()
                 case 'tunnel_sign':
-                    self.state_machine.set_state('just_follow') # Заглушка
+                    self.obstacles['tunnel'].process(self)
                 case 'just_follow':
                     if self.can_move:
                         self.lane_follow.just_follow(self)
