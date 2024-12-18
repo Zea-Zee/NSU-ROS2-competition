@@ -36,15 +36,9 @@ def generate_launch_description():
         executable='create',
         arguments=['-name', 'robot',
                    '-topic', 'robot_description',
-                    #original coordinates
                     '-x', '0.8',
                     '-y', '-1.747',
                     '-z', '0.08',
-                    #tunnel coordinates
-                #    '-x', '-1.75',
-                #    '-y', '0.8',
-                #    '-z', '0.1',
-                #    '-Y', '-1.57'
                 ],
         output='screen',
     )
