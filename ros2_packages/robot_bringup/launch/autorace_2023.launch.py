@@ -22,13 +22,13 @@ def resolve_start_position(context, sp):
         '1': [1.64, -0.75, 0.08, 3.14],
         '2': [0.67, 0.25, 0.08, 0],
         '3': [1.08, 1.75, 0.08, 3.14],
-        '4': [-1.36, 1.26, 0.08, 0],
+        '4': [-1.60, 1.25, 0.08, 0],
         '5': [-1.75, 0.62, 0.08, 3.14*1.5],
+        '6': [0.6, 1.75, 0.08, 3.14],
     }
 
     # Получаем координаты для заданного номера позиции
     start_position_cords = start_position_list[start_position_arg]
-    print('!'*100, str(start_position_cords[0]), str(start_position_cords[1]), str(start_position_cords[2]))
 
     # Создаём узел для спауна робота с выбранными координатами
     create_node = Node(

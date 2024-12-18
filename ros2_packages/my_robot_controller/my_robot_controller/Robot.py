@@ -11,6 +11,7 @@ import numpy as np
 from sensor_msgs.msg import Image, LaserScan
 from nav_msgs.msg import Odometry
 from .Detector import Detector
+import time
 # import threading
 
 
@@ -23,6 +24,7 @@ class StateMachine:
         self.states = states
         self.current_state = states[0]
         self.name_to_index = {name: i for i, name in enumerate(states)}
+        #self.curr_undex
 
     def increase_state(self):
         index = self.name_to_index[self.current_state]
@@ -73,10 +75,10 @@ class Robot(Node):
 
         # Создаем машину состояний состояющую из препятствий
         self.state_machine = StateMachine(
-            ['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign', 'just_follow'])
+            ['just_follow', 'traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign'])
         if state is not None:
             self.state_machine.set_state(state)
-
+        
         self.obstacles = {
             'tunnel': TunnelObstacle()
         }
@@ -93,8 +95,8 @@ class Robot(Node):
         # information about robot position and speed
         self.position = None
         self.orientation = None
-
-        self.can_move = False
+        
+        self.can_move = True #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
         self.side = None
         self.linear_velocity = None
         self.angular_velocity = None
@@ -106,6 +108,10 @@ class Robot(Node):
         self.lidar_scan = None
         self.yolo_result = None
         self.yolo_image = None
+
+        #ДЛЯ ПЕРЕКРЁСТКА
+        self.stop_flag = False
+        self.ped_can_move_flag = False
 
         self.bridge = CvBridge()
 
@@ -262,6 +268,42 @@ class Robot(Node):
                 angular_z = 0.8
         self.lane_follow.just_follow(self, speed=cross_speed, z_speed=angular_z, hold_side=self.side)
 
+    def pedestrian_crossing(self):
+        #self.lane_follow.just_follow(self, speed=0.1)
+        #self.get_logger().info(f'\n\nPedastrial!!!')
+        if not self.stop_flag:
+            self.stop_flag = True
+            self.lane_follow.just_follow(self, hold_side='left')
+            #self.get_logger().info(f'MOVE')
+            for box in self.boxes:
+                if box['label'] == 'crossing_sign' and box['conf'] > 0.80:
+                    self.stop_flag = False
+            return
+
+        #self.get_logger().info(f'STOP')
+        if not self.ped_can_move_flag:
+            self.lane_follow.just_follow(self, speed=0.0, z_speed=0.0)
+            x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
+            yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+            ang_speed = 3.14 / 32 if yaw <= 0 else -(3.14 / 32)
+
+            if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1:
+                self.move(linear_x=0.0, angular_z=ang_speed)
+            else:
+                self.move(linear_x=0.0, angular_z=0.0)
+                #self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
+
+                #bbox = curr_depth_image[int(box['y_min']):int(box['y_max']), int(box['x_min']):int(box['x_max'])]
+                #cv2.imshow('pedastrial',self.depth_image[150:250, 165:700])
+                #self.get_logger().info(f'{np.min(self.depth_image[150:250, 165:700])}')
+
+                if np.min(self.depth_image[150:250, 165:700]):
+                    self.move(0.15, 0.0)
+                    time.sleep(1.5)
+                    self.move(0.0, 0.0)
+                    self.state_machine.set_state('just_follow')
+
+
     # Main function
     def process_mode(self):
         if self.cv_image is not None:
@@ -279,13 +321,15 @@ class Robot(Node):
                     self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
                     # Функция прохождения лабиринта 
                 case 'parking_sign':
-                    pass
+                    self.state_machine.set_state('just_follow') # Заглушка
                 case 'crossing_sign':
-                    pass
+                    self.lane_follow.just_follow(self, speed=0.1, hold_side='left')
+                    self.pedestrian_crossing()
                 case 'tunnel_sign':
-                    pass
+                    self.state_machine.set_state('just_follow') # Заглушка
                 case 'just_follow':
-                    self.lane_follow.just_follow(self)
+                    if self.can_move:
+                        self.lane_follow.just_follow(self)
                 case _:
                     self.lane_follow.just_follow(self)
 
@@ -313,26 +357,32 @@ class Robot(Node):
             #break
             bbox = curr_depth_image[int(box['y_min']):int(box['y_max']), int(box['x_min']):int(box['x_max'])]
             #self.get_logger().info(f'{bbox[len(bbox)//2, len(bbox[0])//2]}')
+
+            if not self.can_move and box['label'].startswith('traffic') and box['conf'] > 0.80: #светофор
+                self.get_logger().info(f"{box['label']}: {box['conf']} conf")
+                self.state_machine.set_state('traffic_light')
+
+
             if bbox[len(bbox)//2, len(bbox[0])//2] > 0.3: # скип если далеко
                 continue
-            
-            if box['label'] == 'T_crossroad' and box['conf'] > 0.80: #Развилка
+
+            elif box['label'] == 'T_crossroad' and box['conf'] > 0.90: #Развилка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('T_crossroad')
 
-            elif box['label'] == 'works_sign' and box['conf'] > 0.80: #Стены
+            elif box['label'] == 'works_sign' and box['conf'] > 0.90: #Стены
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('works_sign')
             
-            elif box['label'] == 'parking_sign' and box['conf'] > 0.80: #Парковка
+            elif box['label'] == 'parking_sign' and box['conf'] > 0.90: #Парковка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('parking_sign')
             
-            elif box['label'] == 'crossing_sign' and box['conf'] > 0.80: #Пешеходный переход
+            elif box['label'] == 'crossing_sign' and box['conf'] > 0.90: #Пешеходный переход
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('crossing_sign')
             
-            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.80: #Тунель
+            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.90: #Тунель
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('tunnel_sign')
             
@@ -428,9 +478,11 @@ class LaneFollowing():
         self.error = width // 2 - fpt_x
 
         # Движение
-
-        robot.move(linear_x=speed, angular_z=(
-            self.error * 90.0 * z_speed / 400) / 15)
+        if speed == 0.0 and z_speed == 0.0:
+            robot.move(linear_x=0.0, angular_z=0.0)
+        else:
+            robot.move(linear_x=speed, angular_z=(
+                self.error * 90.0 * z_speed / 400) / 15)
         # Отображение результатов
 
         if cpt1 and cpt2:
