@@ -818,9 +818,9 @@ class Robot(Node):
                         self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
                         # Функция прохождения лабиринта
                     case 'parking_sign':
-                        #self.parking_task()
-                        self.state_machine.set_state('parking_sign') # Заглушка
-                        self.obstacles['parking'].process(self)
+                        #self.parking_task() #IVAN
+                        self.state_machine.set_state('parking_sign')
+                        self.obstacles['parking'].process(self) # GLEB
 
                     case 'crossing_sign':
                         self.lane_follow.just_follow(self, speed=0.0)
