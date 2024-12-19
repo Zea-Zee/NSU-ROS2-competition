@@ -144,10 +144,22 @@ class Robot(Node):
         self.linear_velocity = None
         self.angular_velocity = None
 
-
+        # information about spawn position
+        self.declare_parameter('spawn_x', 0.0) 
+        self.declare_parameter('spawn_y', 0.0) 
+        self.declare_parameter('spawn_z', 0.0) 
         self.declare_parameter('spawn_angle', 0.0)  # Значение по умолчанию
-        self.start_angle = self.get_parameter('spawn_angle').value
-        self.get_logger().info(f"Начальный угол поворота: {self.start_angle}")
+
+        self.spawn_x = self.get_parameter('spawn_x').value
+        self.spawn_y = self.get_parameter('spawn_y').value
+        self.spawn_z = self.get_parameter('spawn_z').value
+        self.spawn_angle = self.get_parameter('spawn_angle').value
+
+        self.get_logger().info(f"\n\
+                               Начальный X: {self.spawn_x}\n\
+                               Начальный Y: {self.spawn_y}\n\
+                               Начальный Z: {self.spawn_z}\n\
+                               Начальный угол поворота: {self.spawn_angle}\n")
 
         # everything from topics
         self.frame = None
@@ -291,7 +303,7 @@ class Robot(Node):
 
     def get_rotate_angle(self):
         x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
-        yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.start_angle
+        yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.spawn_angle
         return yaw
 
     def get_normalized_odometry(self) -> dict:
@@ -416,7 +428,7 @@ class Robot(Node):
         if not self.ped_can_move_flag:
             self.lane_follow.stop(self)
             #x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
-            #yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.start_angle
+            #yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.spawn_angle
             yaw = self.get_rotate_angle()
             ang_speed = 3.14 / 32
             if yaw >= 0:

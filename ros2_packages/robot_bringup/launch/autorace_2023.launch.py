@@ -47,6 +47,9 @@ def resolve_start_position(context, sp):
     # global start_angle
     # start_angle = start_position_cords[3]
 
+    context.launch_configurations['spawn_x'] = str(start_position_cords[0])
+    context.launch_configurations['spawn_y'] = str(start_position_cords[1])
+    context.launch_configurations['spawn_z'] = str(start_position_cords[2])
     context.launch_configurations['spawn_angle'] = str(start_position_cords[3])
 
     return [create_node]
@@ -148,7 +151,11 @@ def generate_launch_description():
         package='my_robot_controller',
         executable='run',
         parameters=[{
-        'spawn_angle': LaunchConfiguration('spawn_angle')  # Передача параметра spawn_angle
+        'spawn_x': LaunchConfiguration('spawn_x'),
+        'spawn_y': LaunchConfiguration('spawn_y'),
+        'spawn_z': LaunchConfiguration('spawn_z'),
+        'spawn_angle': LaunchConfiguration('spawn_angle'),  # Передача параметра spawn_angle
+        
     }]
     )
     referee = Node(
