@@ -238,6 +238,26 @@ class Robot(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to convert depth image: {e}")
 
+    def get_bbox_depth_info(self, bbox, min_distance_partition=0.25, method='mean', show_box=False):
+        depth_image = self.get_depth()
+
+        y_min = int(bbox['y_min'])
+        y_max = int(bbox['y_max'])
+        x_min = int(bbox['x_min'])
+        x_max = int(bbox['x_max'])
+        depth_hummer = depth_image[y_min:y_max, x_min:x_max]
+
+        sorted_values = np.sort(depth_hummer.flatten())
+        min_part = sorted_values[:int(len(sorted_values) * min_distance_partition)]
+        mean_value = np.mean(min_part)
+
+        if show_box:
+            cv2.imshow('Depth hummer', depth_hummer)
+            cv2.waitKey(1)
+            log(self, f"Mean for {min_distance_partition} min pixels: {mean_value}", 'INFO')
+
+        return mean_value
+
     def _camera_callback(self, msg):
         try:
             self.frame = msg
@@ -581,8 +601,8 @@ class Robot(Node):
             self.move(linear_x=new_v)
             return False
         elif self.current_task == 'rotate':
-            if random.randint(0, 100) == 1:
-                log(self, f"Cur orient {odom['orient']}", 'INFO')
+            # if random.randint(0, 100) == 1:
+                # log(self, f"Cur orient {odom['orient']}", 'INFO')
             if abs(err_a) < epsilon / 8:
                 self.current_task = None
                 self.target_odom = None
@@ -595,8 +615,8 @@ class Robot(Node):
                 new_w = max_w
             elif new_w < -max_w:
                 new_w = -max_w
-            if random.randint(0, 100) == 1:
-                log(self, f"Cur w {new_w}", 'INFO')
+            # if random.randint(0, 100) == 1:
+                # log(self, f"Cur w {new_w}", 'INFO')
             self.move(angular_z=new_w)
             return False
         return False
@@ -614,7 +634,7 @@ class Robot(Node):
                     self.get_odometry() is not None and
                     self.yolo_image is not None
                 ):
-                    time.sleep(1)   #TODO: убрать, но пока пусть спит перед стартом тормоз ебаный
+                    time.sleep(0.1)   #TODO: убрать, но пока пусть спит перед стартом тормоз ебаный
                     log(self,
                         f"Robot interface initialized with state {self.state_machine.get_state()}", "GOOD_INFO")
                     self.fully_initialized = True
@@ -625,6 +645,9 @@ class Robot(Node):
             if self.current_task is not None:
                 if self.state_machine.get_state() == 'parking_sign':
                     if not self.is_task_completed(epsilon=0.025):
+                        return None
+                elif self.state_machine.get_state() == 'just_follow':
+                    if not self.is_task_completed(epsilon=0.1):
                         return None
                 elif not self.is_task_completed():
                     return None
@@ -671,8 +694,8 @@ class Robot(Node):
                 # TODO: сделать блокировку
                 self.boxes, self.yolo_image, _ = self.detector.process_image(self.cv_image)
                 self.check_for_state_transition(self.boxes)
-                cv2.imshow('YOLO', self.yolo_image)
-                cv2.waitKey(1)
+                # cv2.imshow('YOLO', self.yolo_image)
+                # cv2.waitKey(1)
         except Exception as e:
             pass
             #self.get_logger().error(
@@ -831,8 +854,8 @@ class LaneFollowing():
             # то же что и выше но картинка не после yolo а оригинальная
             # if image is not None and dst is not None:
             #     concatenated_image = np.vstack((image, dst))
-                # cv2.imshow('Lane camera', concatenated_image)
-                # cv2.waitKey(1)
+                cv2.imshow('Lane camera', concatenated_image)
+                cv2.waitKey(1)
 
 
 # Класс-родитель препятствие в каждом из которых в process будет реализована логика прохождения препятствия
@@ -952,11 +975,69 @@ class ParkingObstacle(Obstacle):
                 case 0:
                     log(robot, "Starting process PARKING", 'NEW_OBSTACLE')
                     # robot.move_task(0.475)
-                    self.lane_follow.just_follow(self)
                     self.state += 1
                 case 1:
-                    robot.rotate_task(np.pi / 2)
+                    # robot.rotate_task(np.pi / 2)
+                    # self.state += 1
+                    robot.lane_follow.just_follow(robot, hold_side='left')
+                    for box in robot.boxes:
+                        if box['label'] == 'hummer_front':
+                            # hummer_depth = robot.get_bbox_depth_info(box)
+                            # log(robot, f"Hummer depthj: {hummer_depth}")
+                            # if hummer_depth < 0.6:
+                            # image_middle = robot.cv_image.shape[1] // 2
+                            # hummer_center_x = (box['x_min'] + box['x_max']) // 2
+                            # if hummer_center_x >= image_middle:
+                            #     self.is_hummer_left = False
+                            # else:
+                            #     self.is_hummer_left = True
+                            robot.move(0.0, 0.0)
+                            self.state += 1
+                            log(robot, "Swithing for double line control", 'STEP')
+                case 2:
+                    robot.lane_follow.just_follow(robot)
+                    # Работает для настройки на 18 секторов
+                    # 15,14,13: (1.8071762, 1.2126777, 10.0)
+                    # log(robot, f"Sectors 2,3,4,5: {sectored_distances[2], sectored_distances[3], sectored_distances[4], sectored_distances[5]}")
+                    if sectored_distances[3] < .225 and sectored_distances[4] < .225 and sectored_distances[5] < .225:
+                        robot.move(0.0)
+                        self.state += 1
+                        self.is_hummer_left = True
+                        # robot.move_task(0.1)
+                        log(robot, "Turning to left parking space", 'STEP')
+                    # log(robot, f"Sectors 16,15,14,13: {sectored_distances[16], sectored_distances[15], sectored_distances[14], sectored_distances[13]}")
+                    if sectored_distances[15] < .225 and sectored_distances[14] < .225 and sectored_distances[13] < .225:
+                        robot.move(0.0)
+                        self.state += 2
+                        self.is_hummer_left = False
+                    #     # robot.move_task(0.1)
+                        log(robot, "Turning to right parking space", 'STEP')
+                case 3:
+                    robot.rotate_task(-np.pi / 4)
+                    self.is_hummer_left = True
+                    self.state += 2
+                case 4:
+                    robot.rotate_task(np.pi / 4)
+                    self.is_hummer_left = False
                     self.state += 1
+                case 5:
+                    robot.move_task(0.4)
+                    self.state += 1
+                case 6:
+                    log(robot, "Turning back", 'STEP')
+                    robot.rotate_task(np.pi)
+                    self.state += 1
+                case 7:
+                    robot.move_task(0.4)
+                    self.state += 1
+                case 8:
+                    if self.is_hummer_left is True:
+                        robot.rotate_task(np.pi / 4)
+                    else:
+                        robot.rotate_task(-np.pi / 4)
+                    self.state += 1
+                case 9:
+                    robot.lane_follow.just_follow(robot, hold_side='left')
                 case 2:
                     image_middle = robot.cv_image.shape[1] // 2
                     for box in robot.boxes:
