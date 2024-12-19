@@ -929,7 +929,7 @@ class ParkingObstacle(Obstacle):
                         log(robot, f"Hummer is left: {self.is_hummer_left}", "GOOD_INFO")
                         self.state += 1
                 case 3:
-                    robot.move_task(0.9)
+                    robot.move_task(0.75)
                     self.state += 1
                 case 4:
                     if self.is_hummer_left is True:
@@ -947,7 +947,7 @@ class ParkingObstacle(Obstacle):
                         robot.rotate_task(2 * np.pi / 6)
                     self.state += 1
                 case 7:
-                    robot.move_task(0.4)
+                    robot.move_task(0.2)
                     self.state += 1
                 case 8:
                     if self.is_hummer_left is True:
@@ -959,6 +959,7 @@ class ParkingObstacle(Obstacle):
                 case 9:
                     robot.move_task(0.1)
                     self.state += 1
+
                 case 10:
                     if self.is_hummer_left is True:
                         robot.rotate_task(-np.pi / 2)
@@ -966,7 +967,7 @@ class ParkingObstacle(Obstacle):
                         robot.rotate_task(np.pi / 2)
                     self.state += 1
                 case 11:
-                    robot.move_task(0.4)
+                    robot.move_task(0.35)
                     self.state += 1
                 case 12:
                     if self.is_hummer_left is True:
