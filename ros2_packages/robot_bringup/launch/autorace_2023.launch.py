@@ -23,7 +23,7 @@ def resolve_start_position(context, sp):
         '2': [0.67, 0.25, 0.08, 0.0],
         '3': [1.2, 1.75, 0.08, 3.14],
         '4': [-1.60, 1.25, 0.08, 0.0],
-        '5': [-1.75, 0.62, 0.08, 3.14*1.5],
+        '5': [-1.75, 0.4, 0.08, 3.14*1.5],
         '6': [0.3, 1.75, 0.08, 3.14],
     }
 
@@ -155,7 +155,7 @@ def generate_launch_description():
         'spawn_y': LaunchConfiguration('spawn_y'),
         'spawn_z': LaunchConfiguration('spawn_z'),
         'spawn_angle': LaunchConfiguration('spawn_angle'),  # Передача параметра spawn_angle
-        
+
     }]
     )
     referee = Node(
