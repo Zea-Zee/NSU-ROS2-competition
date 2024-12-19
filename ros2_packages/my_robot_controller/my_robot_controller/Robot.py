@@ -494,6 +494,11 @@ class Robot(Node):
         """
         odom = self.get_normalized_odometry()
         new_orient = odom['orient'] + angle
+        # if new_orient > np.pi:
+        #     new_orient = -np.pi + (new_orient - np.pi)
+        # elif new_orient < -np.pi:
+        #     new_orient = np.pi - (np.pi - new_orient)
+        log(self, f"Old orient: {odom['orient']}, new: {new_orient}", 'INFO')
         self.target_odom = {
             'pos': odom['pos'],
             'orient': new_orient,
@@ -501,7 +506,7 @@ class Robot(Node):
             'angular_v': angular_v
         }
         log(self, f"Registered rotate task for {angle} distance", 'INFO')
-        self.move(angular_z=angular_v)
+        self.move(angular_z=angle)
         self.current_task = 'rotate'
         # log(self, f"Cur odom: {odom}", 'INFO')
         # log(self, f"Target odom: {self.target_odom}", 'INFO')
@@ -552,6 +557,8 @@ class Robot(Node):
             self.move(linear_x=new_v)
             return False
         elif self.current_task == 'rotate':
+            if random.randint(0, 100) == 1:
+                log(self, f"Cur orient {odom['orient']}", 'INFO')
             if abs(err_a) < epsilon / 8:
                 self.current_task = None
                 self.target_odom = None
@@ -586,7 +593,10 @@ class Robot(Node):
 
             # Проверка выполнения задания
             if self.current_task is not None:
-                if not self.is_task_completed():
+                if self.state_machine.get_state() == 'parking_sign':
+                    if not self.is_task_completed(epsilon=0.025):
+                        return None
+                elif not self.is_task_completed():
                     return None
 
             elif self.cv_image is not None:
@@ -791,8 +801,8 @@ class LaneFollowing():
             # то же что и выше но картинка не после yolo а оригинальная
             # if image is not None and dst is not None:
             #     concatenated_image = np.vstack((image, dst))
-                cv2.imshow('Lane camera', concatenated_image)
-                cv2.waitKey(1)
+                # cv2.imshow('Lane camera', concatenated_image)
+                # cv2.waitKey(1)
 
 
 # Класс-родитель препятствие в каждом из которых в process будет реализована логика прохождения препятствия
@@ -929,7 +939,7 @@ class ParkingObstacle(Obstacle):
                         log(robot, f"Hummer is left: {self.is_hummer_left}", "GOOD_INFO")
                         self.state += 1
                 case 3:
-                    robot.move_task(0.75)
+                    robot.move_task(0.825)
                     self.state += 1
                 case 4:
                     if self.is_hummer_left is True:
@@ -975,10 +985,10 @@ class ParkingObstacle(Obstacle):
                     else:
                         robot.rotate_task(-np.pi / 2)
                     self.state += 1
-                case 12:
+                case 13:
                     robot.move_task(0.8)
                     self.state += 1
-                case 13:
+                case 14:
                     robot.rotate_task(np.pi / 2)
                     self.state += 1
 
