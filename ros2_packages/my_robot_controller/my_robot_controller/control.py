@@ -26,8 +26,8 @@ from .WASDMove import WASDController
 
 def main(args=None):
     rclpy.init(args=args)
-    # robot = Robot()
-    robot = Robot(state=None)
+    robot = Robot()
+    #robot = Robot(state='crossing')
     # controller = WASDController(robot)
 
     frequency = 10  # Частота обработки (Гц)

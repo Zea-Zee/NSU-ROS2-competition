@@ -52,6 +52,11 @@ def resolve_start_position(context, sp):
     context.launch_configurations['spawn_z'] = str(start_position_cords[2])
     context.launch_configurations['spawn_angle'] = str(start_position_cords[3])
 
+    context.launch_configurations['spawn_x'] = str(start_position_cords[0])
+    context.launch_configurations['spawn_y'] = str(start_position_cords[1])
+    context.launch_configurations['spawn_z'] = str(start_position_cords[2])
+    context.launch_configurations['spawn_angle'] = str(start_position_cords[3])
+
     return [create_node]
 
 def generate_launch_description():
@@ -65,16 +70,6 @@ def generate_launch_description():
     urdf_path  =  os.path.join(pkg_project_description, 'urdf', 'robot.urdf.xacro')
     robot_desc = ParameterValue(Command(['xacro ', urdf_path]), value_type=str)
 
-    # # # ПОЗИЦИЯ СТАРТА
-    # start_position_arg = TextSubstitution(text=str(LaunchConfiguration('sp')))
-    # start_position_list = {'0': [0.8, -1.747, 0.08, 0],
-    #                        '1': [1.64, -0.75, 0.08, 180],
-    #                        '2': [1.26, 0.27, 0.08, 0],
-    #                        '3': [1.08, 1.75, 0.08, 180],
-    #                        '4': [-1.36, 1.26, 0.08, 0],
-    #                        '5': [-1.75, 0.62, 0.08, 270]}
-    # print('!!!!'*30, start_position_arg)
-    # #start_position_cords = start_position_list[start_position_arg]
 
     sp_arg = DeclareLaunchArgument(
         'sp',
@@ -88,29 +83,6 @@ def generate_launch_description():
             os.path.join(pkg_ros_gz_sim, 'launch', 'gz_sim.launch.py')),
         launch_arguments={'gz_args': "-r course.sdf"}.items(),
     )
-
-    # # Spawn robot
-    # create = Node(
-    #     package='ros_gz_sim',
-    #     executable='create',
-    #     arguments=['-name', 'robot',
-    #                '-topic', 'robot_description',
-    #                 # '-x', str(start_position_cords[0]),
-    #                 # '-y', str(start_position_cords[1]),
-    #                 # '-z', str(start_position_cords[2]),
-    #                 # '-Y', str(start_position_cords[3]),
-    #                 #original coordinates
-    #                 '-x', '0.8',
-    #                 '-y', '-1.747',
-    #                 '-z', '0.08',
-    #                 #tunnel coordinates
-    #             #    '-x', '-1.75',
-    #             #    '-y', '0.8',
-    #             #    '-z', '0.1',
-    #             #    '-Y', '-1.57'
-    #             ],
-    #     output='screen',
-    # )
 
     # Takes the description and joint angles as inputs and publishes the 3D poses of the robot links
     robot_state_publisher = Node(
@@ -147,17 +119,19 @@ def generate_launch_description():
         }],
         output='screen'
     )
+    
     robot_controller = Node(
         package='my_robot_controller',
         executable='run',
         parameters=[{
-        'spawn_x': LaunchConfiguration('spawn_x'),
-        'spawn_y': LaunchConfiguration('spawn_y'),
-        'spawn_z': LaunchConfiguration('spawn_z'),
-        'spawn_angle': LaunchConfiguration('spawn_angle'),  # Передача параметра spawn_angle
+            'spawn_x': LaunchConfiguration('spawn_x'),
+            'spawn_y': LaunchConfiguration('spawn_y'),
+            'spawn_z': LaunchConfiguration('spawn_z'),
+            'spawn_angle': LaunchConfiguration('spawn_angle'),
+        }]
 
-    }]
     )
+
     referee = Node(
         package='referee_console',
         executable='mission_autorace_2023_referee'
@@ -179,10 +153,6 @@ def generate_launch_description():
             actions=[
                 OpaqueFunction(function=resolve_start_position, args=[LaunchConfiguration('sp')])
         ]),
-        # OpaqueFunction(function=resolve_start_position, args=[LaunchConfiguration('sp')]),
-        # TimerAction(
-        #     period=0.0,
-        #     actions=[create]),
         TimerAction(
             period=5.0,
             actions=[referee, robot_controller])
