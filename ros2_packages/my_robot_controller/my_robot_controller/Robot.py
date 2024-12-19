@@ -147,10 +147,17 @@ class Robot(Node):
         self.angular_velocity = None
 
         # information about spawn position
-        self.declare_parameter('spawn_x', 0.0) 
-        self.declare_parameter('spawn_y', 0.0) 
-        self.declare_parameter('spawn_z', 0.0) 
+        self.declare_parameter('spawn_x', 0.0)
+        self.declare_parameter('spawn_y', 0.0)
+        self.declare_parameter('spawn_z', 0.0)
         self.declare_parameter('spawn_angle', 0.0)  # Значение по умолчанию
+
+        self.spawn_odom = {
+            'pos': (self.get_parameter('spawn_x').value, self.get_parameter('spawn_y').value),
+            'orient': self.get_parameter('spawn_angle').value,
+            'linear_v': 0,
+            'angular_v': 0
+        }
 
         self.spawn_x = self.get_parameter('spawn_x').value
         self.spawn_y = self.get_parameter('spawn_y').value
@@ -308,7 +315,7 @@ class Robot(Node):
         yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.spawn_angle
         return yaw
 
-    def get_normalized_odometry(self) -> dict:
+    def get_normalized_odometry(self, use_start_odom=False) -> dict:
         """Берет и обрабатывает значения из топика одометрии приводя к нормальному виду.
 
         Returns:
@@ -336,12 +343,24 @@ class Robot(Node):
             ]
             z = quaternion_to_z_angle(q)
 
-            normalized_odom = {
-                'pos': (odom['position'].x, odom['position'].y),
-                'orient': z,
-                'linear_v': odom['linear_velocity'].x,
-                'angular_v': odom['angular_velocity'].z
-            }
+            if use_start_odom is True:
+                real_x = odom['position'].x - self.spawn_odom['pos'][0]
+                real_y = odom['position'].y - self.spawn_odom['pos'][1]
+                real_orient = z - self.spawn_odom['orient']
+
+                normalized_odom = {
+                    'pos': (real_x, real_y),
+                    'orient': real_orient,
+                    'linear_v': odom['linear_velocity'].x,
+                    'angular_v': odom['angular_velocity'].z
+                }
+            else:
+                normalized_odom = {
+                    'pos': (odom['position'].x, odom['position'].y),
+                    'orient': z,
+                    'linear_v': odom['linear_velocity'].x,
+                    'angular_v': odom['angular_velocity'].z
+                }
             return normalized_odom
         except Exception as e:
             log(self, f"Error in robot.get_normalized_odometry: {e}", 'ERROR')
@@ -478,11 +497,11 @@ class Robot(Node):
         log(self, f"Registered move task for {distance} distance", 'INFO')
         self.move(linear_x=linear_x)
         self.current_task = 'move'
-        # log(self, f"Cur odom: {odom}", 'INFO')
-        # log(self, f"Target odom: {self.target_odom}", 'INFO')
+        log(self, f"Cur odom: {odom}", 'INFO')
+        log(self, f"Target odom: {self.target_odom}", 'INFO')
         return 0
 
-    def rotate_task(self, angle, angular_v=np.pi / 2):
+    def rotate_task(self, angle_diff=None, fixed_angle=None, angular_v=np.pi / 2):
         """Дает задание для поворота ровно на заданное количество радиан.
 
         Args:
@@ -493,11 +512,14 @@ class Robot(Node):
             _type_: Просто ноль, #TODO:Убрать.
         """
         odom = self.get_normalized_odometry()
-        new_orient = odom['orient'] + angle
-        # if new_orient > np.pi:
-        #     new_orient = -np.pi + (new_orient - np.pi)
-        # elif new_orient < -np.pi:
-        #     new_orient = np.pi - (np.pi - new_orient)
+        if angle_diff is not None:
+            new_orient = odom['orient'] + angle_diff
+        elif fixed_angle is not None:
+            new_orient = fixed_angle
+        else:
+            return 0
+        if new_orient < 0:
+            new_orient = np.pi + (np.pi + new_orient)
         log(self, f"Old orient: {odom['orient']}, new: {new_orient}", 'INFO')
         self.target_odom = {
             'pos': odom['pos'],
@@ -505,11 +527,11 @@ class Robot(Node):
             'linear_v': odom['linear_v'],
             'angular_v': angular_v
         }
-        log(self, f"Registered rotate task for {angle} distance", 'INFO')
-        self.move(angular_z=angle)
+        log(self, f"Registered rotate task for {angle_diff} distance", 'INFO')
+        self.move(angular_z=angle_diff)
         self.current_task = 'rotate'
-        # log(self, f"Cur odom: {odom}", 'INFO')
-        # log(self, f"Target odom: {self.target_odom}", 'INFO')
+        log(self, f"Cur odom: {odom}", 'INFO')
+        log(self, f"Target odom: {self.target_odom}", 'INFO')
         return 0
 
     def is_task_completed(self, epsilon=0.01, min_v=0.025, max_v=1.25, min_w=np.pi / 8, max_w=np.pi / 3, safe_mode=True):
@@ -547,6 +569,8 @@ class Robot(Node):
                     time.sleep(0.1)
                     return True
             if abs(err_x) < epsilon and abs(err_y) < epsilon:
+                if random.randint(0, 25) == 1:
+                    log(self, f"Cur pos {odom['pos']}", 'INFO')
                 self.current_task = None
                 self.target_odom = None
                 log(self, "Finished move task", 'INFO')
@@ -567,6 +591,12 @@ class Robot(Node):
                 time.sleep(0.1)
                 return True
             new_w = err_a * max_w
+            if new_w > max_w:
+                new_w = max_w
+            elif new_w < -max_w:
+                new_w = -max_w
+            if random.randint(0, 100) == 1:
+                log(self, f"Cur w {new_w}", 'INFO')
             self.move(angular_z=new_w)
             return False
         return False
@@ -921,7 +951,8 @@ class ParkingObstacle(Obstacle):
             match self.state:
                 case 0:
                     log(robot, "Starting process PARKING", 'NEW_OBSTACLE')
-                    robot.move_task(0.475)
+                    # robot.move_task(0.475)
+                    self.lane_follow.just_follow(self)
                     self.state += 1
                 case 1:
                     robot.rotate_task(np.pi / 2)
@@ -939,7 +970,7 @@ class ParkingObstacle(Obstacle):
                         log(robot, f"Hummer is left: {self.is_hummer_left}", "GOOD_INFO")
                         self.state += 1
                 case 3:
-                    robot.move_task(0.825)
+                    robot.move_task(0.8)
                     self.state += 1
                 case 4:
                     if self.is_hummer_left is True:
@@ -957,7 +988,7 @@ class ParkingObstacle(Obstacle):
                         robot.rotate_task(2 * np.pi / 6)
                     self.state += 1
                 case 7:
-                    robot.move_task(0.2)
+                    robot.move_task(0.15)
                     self.state += 1
                 case 8:
                     if self.is_hummer_left is True:
@@ -967,7 +998,7 @@ class ParkingObstacle(Obstacle):
                     self.state += 1
 
                 case 9:
-                    robot.move_task(0.1)
+                    # robot.move_task(0.1)
                     self.state += 1
 
                 case 10:
@@ -977,7 +1008,7 @@ class ParkingObstacle(Obstacle):
                         robot.rotate_task(np.pi / 2)
                     self.state += 1
                 case 11:
-                    robot.move_task(0.35)
+                    robot.move_task(0.325)
                     self.state += 1
                 case 12:
                     if self.is_hummer_left is True:
@@ -986,7 +1017,7 @@ class ParkingObstacle(Obstacle):
                         robot.rotate_task(-np.pi / 2)
                     self.state += 1
                 case 13:
-                    robot.move_task(0.8)
+                    robot.move_task(0.875)
                     self.state += 1
                 case 14:
                     robot.rotate_task(np.pi / 2)
