@@ -289,6 +289,11 @@ class Robot(Node):
             'angular_velocity': self.angular_velocity,
         }
 
+    def get_rotate_angle(self):
+        x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
+        yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.start_angle
+        return yaw
+
     def get_normalized_odometry(self) -> dict:
         """Берет и обрабатывает значения из топика одометрии приводя к нормальному виду.
 
@@ -410,8 +415,9 @@ class Robot(Node):
         #self.get_logger().info(f'STOP')
         if not self.ped_can_move_flag:
             self.lane_follow.stop(self)
-            x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
-            yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.start_angle
+            #x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
+            #yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.start_angle
+            yaw = self.get_rotate_angle()
             ang_speed = 3.14 / 32
             if yaw >= 0:
                 ang_speed = -ang_speed
