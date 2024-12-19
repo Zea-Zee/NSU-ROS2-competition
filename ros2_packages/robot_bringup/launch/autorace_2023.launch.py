@@ -18,18 +18,17 @@ def resolve_start_position(context, sp):
 
     # Список стартовых координат
     start_position_list = {
-        '0': [0.8, -1.747, 0.08, 0],
+        '0': [0.8, -1.747, 0.08, 0.0],
         '1': [1.64, -0.75, 0.08, 3.14],
-        '2': [0.67, 0.25, 0.08, 0],
-        '3': [1.08, 1.75, 0.08, 3.14],
-        '4': [-1.60, 1.25, 0.08, 0],
-        '5': [-1.75, 0.62, 0.08, 3.14*1.5],
-        '6': [0.6, 1.75, 0.08, 3.14],
+        '2': [0.67, 0.25, 0.08, 0.0],
+        '3': [1.2, 1.75, 0.08, 3.14],
+        '4': [-1.60, 1.25, 0.08, 0.0],
+        '5': [-1.75, 0.4, 0.08, 3.14*1.5],
+        '6': [0.3, 1.75, 0.08, 3.14],
     }
 
     # Получаем координаты для заданного номера позиции
     start_position_cords = start_position_list[start_position_arg]
-    #print('!'*100, str(start_position_cords[0]), str(start_position_cords[1]), str(start_position_cords[2]))
 
     # Создаём узел для спауна робота с выбранными координатами
     create_node = Node(
@@ -45,6 +44,13 @@ def resolve_start_position(context, sp):
         ],
         output='screen',
     )
+    # global start_angle
+    # start_angle = start_position_cords[3]
+
+    context.launch_configurations['spawn_x'] = str(start_position_cords[0])
+    context.launch_configurations['spawn_y'] = str(start_position_cords[1])
+    context.launch_configurations['spawn_z'] = str(start_position_cords[2])
+    context.launch_configurations['spawn_angle'] = str(start_position_cords[3])
 
     context.launch_configurations['spawn_x'] = str(start_position_cords[0])
     context.launch_configurations['spawn_y'] = str(start_position_cords[1])
@@ -123,6 +129,7 @@ def generate_launch_description():
             'spawn_z': LaunchConfiguration('spawn_z'),
             'spawn_angle': LaunchConfiguration('spawn_angle'),
         }]
+
     )
 
     referee = Node(
