@@ -318,7 +318,7 @@ class Robot(Node):
         x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
         yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.spawn_angle
         if yaw > np.pi: # !!!!!!!!!!!!!!!!!!!!!!!!!!
-            yaw -= np.pi 
+            yaw -= 2 * np.pi 
         return yaw
 
     def get_normalized_odometry(self, use_start_odom=False) -> dict:
@@ -476,13 +476,22 @@ class Robot(Node):
             self.get_logger().info(f'{np.min(self.depth_image[200:220, 230:670])}')
 
             if np.min(self.depth_image[200:220, 230:670]) > 0.3 and np.min(self.depth_image[200:220, 230:670]) != float('-inf'):
-                self.move_task(0.35, 0.5)
+                #self.move_task(0.35, 0.5)
                 #self.rotate_task(-np.pi/2)
+                self.move(0.2)
+                time.sleep(1.0)
+                self.move(0.0)
                 self.lane_follow.start(self)
                 self.state_machine.set_state('just_follow')
 
     def parking_task(self):
         # Лидар, в массиве ranges от -pi до pi, -pi СПЕРЕДИ | -25, 25 | 155:205
+
+        # self.parking_state = 100
+        # self.lane_follow.stop(self)
+        # self.move(0.0, -0.5)
+        # self.get_logger().info(f'{np.degrees(self.get_rotate_angle())}')
+
         match(self.parking_state):
             case 0:
                 self.lane_follow.just_follow(self, hold_side='left')
@@ -499,14 +508,114 @@ class Robot(Node):
                         self.hammer_side = 'left'
                     else:
                         self.hammer_side = 'right'
+
+                    self.lane_follow.stop(self)
+                    self.get_logger().info(f'{self.get_rotate_angle()}, {self.hammer_side}')
                     self.parking_state += 1
+                    self.move(0.15)
             case 2:
-                self.lane_follow.stop(self)
-                self.get_logger().info(f'{self.get_rotate_angle()}, {self.hammer_side}')
-                self.parking_state += 1
+                image = self.cv_image
+                condition = ((image[:, :, 2] > 220) & (
+                    image[:, :, 1] > 220) & (image[:, :, 0] < 30))
+                image[condition] = 255
+                grays = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+                grays[grays < 219] = 0
+                _, gray = cv2.threshold(grays, 170, 255, cv2.THRESH_BINARY)
+
+                height, width = gray.shape
+                dst = gray[3 * height // 4:, 7 * width // 15: 8 * width // 15]
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
+                cv2.imshow('parking', dst)
+
+                self.get_logger().info(f'{np.max(dst)}')
+
+                if np.max(dst) > 128.0:
+                    self.parking_state += 1
+                    self.move(0.0)
             case 3:
+                rotate_v = 0.3 if self.hammer_side == 'right' else -0.3
+                goal_to_rotate = [-1, 1] if self.hammer_side == 'right' else [-179, 179]
+                self.get_logger().info(f'{np.degrees(self.get_rotate_angle())}, {goal_to_rotate}')
                 
-                pass
+                if self.hammer_side == 'right':
+                    if (not (np.degrees(self.get_rotate_angle()) >= goal_to_rotate[0] and np.degrees(self.get_rotate_angle()) <= goal_to_rotate[1])):
+                        self.move(linear_x=0.0, angular_z=rotate_v)
+                    else:
+                        self.move(linear_x=0.05, angular_z=0.0)
+                        self.parking_state += 1
+                else:
+                    if (not (np.degrees(self.get_rotate_angle()) <= goal_to_rotate[0] and np.degrees(self.get_rotate_angle()) >= -180) or 
+                        (np.degrees(self.get_rotate_angle()) >= goal_to_rotate[1] and np.degrees(self.get_rotate_angle()) <= 180)):
+                        self.move(linear_x=0.0, angular_z=rotate_v)
+                    else:
+                        self.move(linear_x=0.05, angular_z=0.0)
+                        self.parking_state += 1
+            case 4:
+                image = self.cv_image
+                condition = ((image[:, :, 2] > 220) & (
+                    image[:, :, 1] > 220) & (image[:, :, 0] < 30))
+                image[condition] = 255
+                grays = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+                grays[grays < 219] = 0
+                _, gray = cv2.threshold(grays, 170, 255, cv2.THRESH_BINARY)
+
+                height, width = gray.shape
+                dst = gray[19 * height // 20: 20 * height // 20, 7 * width // 15: 8 * width // 15]
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
+                cv2.imshow('parking', dst)
+
+                self.get_logger().info(f'{np.max(dst)}')
+                if np.max(dst) > 128.0:
+                    self.parking_state += 1
+                    self.move(0.0, (0.3 if self.hammer_side == 'right' else -0.3))
+            case 5: #-90
+                self.get_logger().info(f'{np.degrees(self.get_rotate_angle())}, {self.parking_state}')
+                if ((np.degrees(self.get_rotate_angle()) >= 89.0) and 
+                    (np.degrees(self.get_rotate_angle()) <= 91.0)):
+                    self.move(linear_x=0.0, angular_z=0.0)
+                    self.parking_state += 1
+                    time.sleep(2.0)
+            case 6:
+                rotate_v = 0.3 if self.hammer_side == 'right' else -0.3
+                goal_to_rotate = [-1, 1] if self.hammer_side == 'left' else [-179, 179]
+                self.get_logger().info(f'{np.degrees(self.get_rotate_angle())}, {goal_to_rotate}')
+                
+                if self.hammer_side == 'left':
+                    if (not (np.degrees(self.get_rotate_angle()) >= goal_to_rotate[0] and np.degrees(self.get_rotate_angle()) <= goal_to_rotate[1])):
+                        self.move(linear_x=0.0, angular_z=rotate_v)
+                    else:
+                        self.move(linear_x=0.05, angular_z=0.0)
+                        self.parking_state += 1
+                else:
+                    if (not (np.degrees(self.get_rotate_angle()) <= goal_to_rotate[0] and np.degrees(self.get_rotate_angle()) >= -180) or 
+                        (np.degrees(self.get_rotate_angle()) >= goal_to_rotate[1] and np.degrees(self.get_rotate_angle()) <= 180)):
+                        self.move(linear_x=0.0, angular_z=rotate_v)
+                    else:
+                        self.move(linear_x=0.05, angular_z=0.0)
+                        self.parking_state += 1
+            case 7:
+                lidar_list = self.get_lidar().ranges[-45:] + self.get_lidar().ranges[:45]
+                self.get_logger().info(f'{min(lidar_list)}')
+                if min(lidar_list) <= 0.2:
+                    self.move(0.0, (0.3 if self.hammer_side == 'left' else -0.3))
+                    self.parking_state += 1
+            case 8:
+                self.get_logger().info(f'{np.degrees(self.get_rotate_angle())}, {self.parking_state}')
+                if (np.degrees(self.get_rotate_angle()) >= 89.0 and 
+                    np.degrees(self.get_rotate_angle()) <= 91.0):
+                    self.move(linear_x=0.2, angular_z=0.0)
+                    self.parking_state += 1
+                    time.sleep(1.0)
+            case 9:
+                self.move(0.0)
+                self.lane_follow.start(self)
+                self.lane_follow.just_follow(self, hold_side='left')
+                if ((np.degrees(self.get_rotate_angle()) <= -170 and np.degrees(self.get_rotate_angle()) >= -180) or 
+                        (np.degrees(self.get_rotate_angle()) >= 170 and np.degrees(self.get_rotate_angle()) <= 180)):
+                    self.lane_follow.just_follow(self)
+
 
         #self.get_logger().info(f'{min(self.get_lidar().ranges[135:225])}')
         #self.lane_follow.just_follow(self, hold_side='left')
