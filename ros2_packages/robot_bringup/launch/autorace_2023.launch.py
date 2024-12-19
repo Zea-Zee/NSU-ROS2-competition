@@ -161,7 +161,7 @@ def generate_launch_description():
         robot_state_publisher,
         rviz,
         TimerAction(
-            period=3.0,
+            period=0.5,
             actions=[
                 OpaqueFunction(function=resolve_start_position, args=[LaunchConfiguration('sp')])
         ]),
