@@ -671,7 +671,7 @@ class Robot(Node):
         log(self, f"Target odom: {self.target_odom}", 'INFO')
         return 0
 
-    def rotate_task(self, angle_diff=None, fixed_angle=None, angular_v=np.pi / 2):
+    def rotate_task(self, angle_diff=None, angular_v=np.pi / 2):
         """Дает задание для поворота ровно на заданное количество радиан.
 
         Args:
@@ -682,14 +682,14 @@ class Robot(Node):
             _type_: Просто ноль, #TODO:Убрать.
         """
         odom = self.get_normalized_odometry()
-        if angle_diff is not None:
-            new_orient = odom['orient'] + angle_diff
-        elif fixed_angle is not None:
-            new_orient = fixed_angle
-        else:
-            return 0
+        new_orient = odom['orient'] + angle_diff
+        log(self, f"New orient: {new_orient}, cut cond: {new_orient >= (2 * np.pi)}", 'INFO')
+    
         if new_orient < 0:
             new_orient = np.pi + (np.pi + new_orient)
+        if new_orient >= (2 * np.pi):
+            log(self, f"Cutting new_orient", 'INFO')
+            new_orient = new_orient - (2 * np.pi)
         log(self, f"Old orient: {odom['orient']}, new: {new_orient}", 'INFO')
         self.target_odom = {
             'pos': odom['pos'],
@@ -789,19 +789,19 @@ class Robot(Node):
                     self.rotate_task(np.pi/2)
                     self.wall_state += 1
                 case 2:
-                    self.move_task(0.4)
+                    self.move_task(0.415)
                     self.wall_state += 1
                 case 3:
                     self.rotate_task(-np.pi/2)
                     self.wall_state += 1
                 case 4:
-                    self.move_task(0.6)
+                    self.move_task(0.55)
                     self.wall_state += 1
                 case 5:
                     self.rotate_task(-np.pi/2)
                     self.wall_state += 1
                 case 6:
-                    self.move_task(0.4)
+                    self.move_task(0.415)
                     self.wall_state += 1
                 case 7:
                     self.rotate_task(np.pi/2)
