@@ -179,8 +179,10 @@ class Robot(Node):
         self.yolo_result = None
         self.yolo_image = None
 
-        #ДЛЯ ПЕРЕКРЁСТКА
-        self.stop_flag = False
+
+
+        #ДЛЯ ПЕШЕХОДА
+        self.ped_state = 0
         self.ped_can_move_flag = False
 
         #ДЛЯ ПАРКОВКИ
@@ -461,50 +463,55 @@ class Robot(Node):
         self.lane_follow.just_follow(self, speed=cross_speed, z_speed=angular_z, hold_side=self.side)
 
     def pedestrian_crossing(self):
-        #cv2.imshow('pedastrial',self.depth_image[200:220, 230:670])
-        #self.lane_follow.just_follow(self, speed=0.1)
-        #self.get_logger().info(f'\n\nPedastrial!!!')
-        if not self.stop_flag:
-            self.stop_flag = True
-            self.lane_follow.just_follow(self)
-            #self.get_logger().info(f'MOVE')
-            for box in self.boxes:
-                if box['label'] == 'crossing_sign' and box['conf'] > 0.50:
-                    self.stop_flag = False
-            return
+        match self.ped_state:
+            case 0:
+                self.get_logger().info(f'{self.get_rotate_angle()}')
+                self.lane_follow.stop(self)
+                rotate_v = 0.15 if self.get_rotate_angle() <=0 else -0.15
+                self.move(0.0, rotate_v)
+                if self.get_rotate_angle() >= -0.5 and self.get_rotate_angle() <= 0.5:
+                    self.ped_state += 1
+                    self.lane_follow.start(self)
+            case 1:
+                self.lane_follow.just_follow(self, 0.05, hold_side='right')
+                image = self.cv_image
+                condition = ((image[:, :, 2] > 220) & (
+                    image[:, :, 1] > 220) & (image[:, :, 0] < 30))
+                image[condition] = 255
+                grays = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        #self.get_logger().info(f'STOP')
-        if not self.ped_can_move_flag:
-            self.lane_follow.stop(self)
-            #x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
-            #yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.spawn_angle
-            yaw = self.get_rotate_angle()
-            ang_speed = 3.14 / 32
-            if yaw >= 0:
-                ang_speed = -ang_speed
-            #if yaw <= 0 else -(3.14 / 32)
+                grays[grays < 219] = 0
+                _, gray = cv2.threshold(grays, 50, 255, cv2.THRESH_BINARY)
 
-            self.get_logger().info(f'rad: {yaw}, deg: {np.degrees(yaw)}')
+                height, width = gray.shape
+                dst = gray[19 * height // 20: 20 * height // 20, 20 * width // 41: 21 * width // 41]
+                cv2.imshow('parking', dst)
 
-            if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1: #or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
-                self.move(linear_x=0.0, angular_z=ang_speed)
-            else:   
-                self.move(linear_x=0.0, angular_z=0.0)
-                self.ped_can_move_flag = True
+                self.get_logger().info(f'{np.max(dst)}')
 
-        if self.ped_can_move_flag:
-            #cv2.imshow('pedastrial',self.depth_image[150:250, 180:670])
-            #self.lane_follow.just_follow(self, 0.0, 0.0)
-            self.get_logger().info(f'{np.min(self.depth_image[200:220, 230:670])}')
-
-            if np.min(self.depth_image[200:220, 230:670]) > 0.3 and np.min(self.depth_image[200:220, 230:670]) != float('-inf'):
-                #self.move_task(0.35, 0.5)
-                #self.rotate_task(-np.pi/2)
-                self.move(0.2)
-                time.sleep(1.0)
-                self.move(0.0)
+                if np.max(dst) > 128.0:
+                    self.lane_follow.stop(self)
+                    self.ped_state += 1
+                    self.move(0.0)
+            case 2:
+                rotate_v = 0.15 if self.get_rotate_angle() <=0 else -0.15
+                self.move(0.0, rotate_v)
+                if self.get_rotate_angle() >= -0.5 and self.get_rotate_angle() <= 0.5:
+                    self.ped_state += 1
+                    self.move(0.0, 0.0)
+            case 3:
+                lidar_list = self.get_lidar().ranges[-35:] + self.get_lidar().ranges[:35]
+                self.get_logger().info(f'{min(lidar_list)}')
+                if min(lidar_list) > 0.30:
+                    self.ped_state += 1
+                    self.move(0.3, 0.0)
+                    time.sleep(1)
+            case 4:
                 self.lane_follow.start(self)
                 self.state_machine.set_state('just_follow')
+                    
+                
+    
 
 
 
