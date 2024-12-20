@@ -142,7 +142,7 @@ class Robot(Node):
         self.orientation = None
 
         self.wall_state = 0
-        self.can_move = True #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
+        self.can_move = False #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
         self.side = None
         self.linear_velocity = None
         self.angular_velocity = None
@@ -488,7 +488,7 @@ class Robot(Node):
 
             if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1: #or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
                 self.move(linear_x=0.0, angular_z=ang_speed)
-            else:
+            else:   
                 self.move(linear_x=0.0, angular_z=0.0)
                 self.ped_can_move_flag = True
 
@@ -875,7 +875,7 @@ class Robot(Node):
                         #self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
                         # Функция прохождения лабиринта
                     case 'parking_sign':
-                        #self.parking_task() #IVAN
+                        # self.parking_task() #IVAN
                         self.state_machine.set_state('parking_sign')
                         self.obstacles['parking'].process(self) # GLEB
 
@@ -925,26 +925,26 @@ class Robot(Node):
                 self.state_machine.set_state('traffic_light')
 
 
-            if bbox[len(bbox)//2, len(bbox[0])//2] > 0.3: # скип если далеко
-                continue
+            # if bbox[len(bbox)//2, len(bbox[0])//2] > 0.3: # скип если далеко
+            #     continue
 
-            elif box['label'] == 'T_crossroad' and box['conf'] > 0.85: #Развилка
+            elif box['label'] == 'T_crossroad' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.3: #Развилка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('T_crossroad')
 
-            elif box['label'] == 'works_sign' and box['conf'] > 0.85: #Стены
+            elif box['label'] == 'works_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.3: #Стены
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('works_sign')
 
-            elif box['label'] == 'parking_sign' and box['conf'] > 0.85: #Парковка
+            elif box['label'] == 'parking_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.3: #Парковка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('parking_sign')
 
-            elif box['label'] == 'crossing_sign' and box['conf'] > 0.85: #Пешеходный переход
+            elif box['label'] == 'crossing_sign' and box['conf'] > 0.80 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.5: #Пешеходный переход
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('crossing_sign')
 
-            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.85: #Тунель
+            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.4: #Тунель
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('tunnel_sign', )
                 # self.get_logger().info(f"Now state is: {self.state_machine.get_state()} conf")
@@ -1149,7 +1149,7 @@ class TunnelObstacle(Obstacle):
                     self.max_rad = odom['orient'] + np.pi / 2
                     # log(robot, f"Min rad: {self.min_rad} Max rad: {self.max_rad} Cur rad: {odom['orient']}", 'GOOD_INFO')
                     self.state += 1
-                    robot.move_task(0.4)
+                    robot.move_task(0.6)
                 case 1:
                     # Повернемся по направлению где наибольшая дистанция
                     for box in robot.boxes:
@@ -1260,8 +1260,12 @@ class ParkingObstacle(Obstacle):
                     robot.move_task(0.45)
                     self.state += 1
                 case 10:
+                    robot.move(0.0)
                     robot.lane_follow.just_follow(robot, hold_side='left')
-                    # self.state += 1
+                    if ((np.degrees(robot.get_rotate_angle()) <= -170 and np.degrees(robot.get_rotate_angle()) >= -180) or 
+                            (np.degrees(robot.get_rotate_angle()) >= 170 and np.degrees(robot.get_rotate_angle()) <= 180)):
+                        robot.lane_follow.just_follow(robot)
+                        # self.state += 1
                 # case 10:
                 #     for box in robot.boxes:
                 #         if box['label'] == 'parking_sign':
