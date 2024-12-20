@@ -141,11 +141,12 @@ class Robot(Node):
         self.position = None
         self.orientation = None
 
+        self.wall_state = 0
         self.can_move = True #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
         self.side = None
         self.linear_velocity = None
         self.angular_velocity = None
-
+        self.completed_walls = False
         # information about spawn position
         self.declare_parameter('spawn_x', 0.0)
         self.declare_parameter('spawn_y', 0.0)
@@ -505,6 +506,8 @@ class Robot(Node):
                 self.lane_follow.start(self)
                 self.state_machine.set_state('just_follow')
 
+
+
     def parking_task(self):
         # Лидар, в массиве ranges от -pi до pi, -pi СПЕРЕДИ | -25, 25 | 155:205
 
@@ -769,6 +772,56 @@ class Robot(Node):
             return False
         return False
 
+    def working_area(self):
+        distance_to_lidar = self.get_sectored_lidar()[0]
+        log(self, f"Target current distance to wall: {distance_to_lidar}", 'INFO')
+        if not self.completed_walls and distance_to_lidar > 0.18:
+            self.lane_follow.just_follow(self, hold_side='right')
+        else:
+            self.completed_walls = True
+            # hard coding
+            match self.wall_state:
+                case 0:
+                    self.move(0.0, 0.0)
+                    self.wall_state += 1
+                case 1:
+
+                    self.rotate_task(np.pi/2)
+                    self.wall_state += 1
+                case 2:
+                    self.move_task(0.4)
+                    self.wall_state += 1
+                case 3:
+                    self.rotate_task(-np.pi/2)
+                    self.wall_state += 1
+                case 4:
+                    self.move_task(0.6)
+                    self.wall_state += 1
+                case 5:
+                    self.rotate_task(-np.pi/2)
+                    self.wall_state += 1
+                case 6:
+                    self.move_task(0.4)
+                    self.wall_state += 1
+                case 7:
+                    self.rotate_task(np.pi/2)
+                    self.wall_state += 1
+                case 8:
+                    self.move_task(0.2)
+                    self.wall_state += 1
+                case 9:
+                    self.lane_follow.just_follow(self, hold_side='right')
+                    #self.state_machine.set_state('just_follow')
+            # self.move(linear_x=0.0, angular_z=0.3)
+            # time.sleep(1)
+            # self.move(linear_x=0.2, angular_z=0.0)
+            # time.sleep(1)
+            # self.move(linear_x=0.0, angular_z=0.3)
+            # time.sleep(1)
+            # self.move(linear_x=0.2, angular_z=0.0)
+            # time.sleep(1)
+            # self.move(linear_x=0.0, angular_z=-0.3)
+
     # Main function
 
     def process_mode(self):
@@ -797,6 +850,9 @@ class Robot(Node):
                 elif self.state_machine.get_state() == 'just_follow':
                     if not self.is_task_completed(epsilon=0.1):
                         return None
+                elif self.state_machine.get_state() == 'works_sign':
+                    if not self.is_task_completed(epsilon=0.1):
+                        return None
                 elif not self.is_task_completed():
                     return None
 
@@ -815,7 +871,8 @@ class Robot(Node):
                     case 'T_crossroad':
                         self.T_cross_road()
                     case 'works_sign':
-                        self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
+                        self.working_area()
+                        #self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
                         # Функция прохождения лабиринта
                     case 'parking_sign':
                         #self.parking_task() #IVAN
