@@ -141,11 +141,12 @@ class Robot(Node):
         self.position = None
         self.orientation = None
 
-        self.can_move = True #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
+        self.wall_state = 0
+        self.can_move = False #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
         self.side = None
         self.linear_velocity = None
         self.angular_velocity = None
-
+        self.completed_walls = False
         # information about spawn position
         self.declare_parameter('spawn_x', 0.0)
         self.declare_parameter('spawn_y', 0.0)
@@ -487,7 +488,7 @@ class Robot(Node):
 
             if np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1: #or np.degrees(yaw) >= 1 or np.degrees(yaw) <= -1 or np.degrees(yaw) >= 89 or np.degrees(yaw) <= -91 or np.degrees(yaw) >= -89 or np.degrees(yaw) <= -91: # 1, -1
                 self.move(linear_x=0.0, angular_z=ang_speed)
-            else:
+            else:   
                 self.move(linear_x=0.0, angular_z=0.0)
                 self.ped_can_move_flag = True
 
@@ -504,6 +505,8 @@ class Robot(Node):
                 self.move(0.0)
                 self.lane_follow.start(self)
                 self.state_machine.set_state('just_follow')
+
+
 
     def parking_task(self):
         # Лидар, в массиве ranges от -pi до pi, -pi СПЕРЕДИ | -25, 25 | 155:205
@@ -668,7 +671,7 @@ class Robot(Node):
         log(self, f"Target odom: {self.target_odom}", 'INFO')
         return 0
 
-    def rotate_task(self, angle_diff=None, fixed_angle=None, angular_v=np.pi / 2):
+    def rotate_task(self, angle_diff=None, angular_v=np.pi / 2):
         """Дает задание для поворота ровно на заданное количество радиан.
 
         Args:
@@ -679,14 +682,14 @@ class Robot(Node):
             _type_: Просто ноль, #TODO:Убрать.
         """
         odom = self.get_normalized_odometry()
-        if angle_diff is not None:
-            new_orient = odom['orient'] + angle_diff
-        elif fixed_angle is not None:
-            new_orient = fixed_angle
-        else:
-            return 0
+        new_orient = odom['orient'] + angle_diff
+        log(self, f"New orient: {new_orient}, cut cond: {new_orient >= (2 * np.pi)}", 'INFO')
+    
         if new_orient < 0:
             new_orient = np.pi + (np.pi + new_orient)
+        if new_orient >= (2 * np.pi):
+            log(self, f"Cutting new_orient", 'INFO')
+            new_orient = new_orient - (2 * np.pi)
         log(self, f"Old orient: {odom['orient']}, new: {new_orient}", 'INFO')
         self.target_odom = {
             'pos': odom['pos'],
@@ -769,6 +772,56 @@ class Robot(Node):
             return False
         return False
 
+    def working_area(self):
+        distance_to_lidar = self.get_sectored_lidar()[0]
+        log(self, f"Target current distance to wall: {distance_to_lidar}", 'INFO')
+        if not self.completed_walls and distance_to_lidar > 0.18:
+            self.lane_follow.just_follow(self, hold_side='right')
+        else:
+            self.completed_walls = True
+            # hard coding
+            match self.wall_state:
+                case 0:
+                    self.move(0.0, 0.0)
+                    self.wall_state += 1
+                case 1:
+
+                    self.rotate_task(np.pi/2)
+                    self.wall_state += 1
+                case 2:
+                    self.move_task(0.415)
+                    self.wall_state += 1
+                case 3:
+                    self.rotate_task(-np.pi/2)
+                    self.wall_state += 1
+                case 4:
+                    self.move_task(0.55)
+                    self.wall_state += 1
+                case 5:
+                    self.rotate_task(-np.pi/2)
+                    self.wall_state += 1
+                case 6:
+                    self.move_task(0.415)
+                    self.wall_state += 1
+                case 7:
+                    self.rotate_task(np.pi/2)
+                    self.wall_state += 1
+                case 8:
+                    self.move_task(0.2)
+                    self.wall_state += 1
+                case 9:
+                    self.lane_follow.just_follow(self, hold_side='right')
+                    #self.state_machine.set_state('just_follow')
+            # self.move(linear_x=0.0, angular_z=0.3)
+            # time.sleep(1)
+            # self.move(linear_x=0.2, angular_z=0.0)
+            # time.sleep(1)
+            # self.move(linear_x=0.0, angular_z=0.3)
+            # time.sleep(1)
+            # self.move(linear_x=0.2, angular_z=0.0)
+            # time.sleep(1)
+            # self.move(linear_x=0.0, angular_z=-0.3)
+
     # Main function
 
     def process_mode(self):
@@ -797,6 +850,9 @@ class Robot(Node):
                 elif self.state_machine.get_state() == 'just_follow':
                     if not self.is_task_completed(epsilon=0.1):
                         return None
+                elif self.state_machine.get_state() == 'works_sign':
+                    if not self.is_task_completed(epsilon=0.1):
+                        return None
                 elif not self.is_task_completed():
                     return None
 
@@ -815,10 +871,11 @@ class Robot(Node):
                     case 'T_crossroad':
                         self.T_cross_road()
                     case 'works_sign':
-                        self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
+                        self.working_area()
+                        #self.state_machine.set_state('just_follow') # Заглушка, т.к. состояние не ресетается после выполнения перекрёстка
                         # Функция прохождения лабиринта
                     case 'parking_sign':
-                        #self.parking_task() #IVAN
+                        # self.parking_task() #IVAN
                         self.state_machine.set_state('parking_sign')
                         self.obstacles['parking'].process(self) # GLEB
 
@@ -868,26 +925,26 @@ class Robot(Node):
                 self.state_machine.set_state('traffic_light')
 
 
-            if bbox[len(bbox)//2, len(bbox[0])//2] > 0.3: # скип если далеко
-                continue
+            # if bbox[len(bbox)//2, len(bbox[0])//2] > 0.3: # скип если далеко
+            #     continue
 
-            elif box['label'] == 'T_crossroad' and box['conf'] > 0.85: #Развилка
+            elif box['label'] == 'T_crossroad' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.3: #Развилка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('T_crossroad')
 
-            elif box['label'] == 'works_sign' and box['conf'] > 0.85: #Стены
+            elif box['label'] == 'works_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.3: #Стены
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('works_sign')
 
-            elif box['label'] == 'parking_sign' and box['conf'] > 0.85: #Парковка
+            elif box['label'] == 'parking_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.3: #Парковка
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('parking_sign')
 
-            elif box['label'] == 'crossing_sign' and box['conf'] > 0.85: #Пешеходный переход
+            elif box['label'] == 'crossing_sign' and box['conf'] > 0.80 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.5: #Пешеходный переход
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('crossing_sign')
 
-            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.85: #Тунель
+            elif box['label'] == 'tunnel_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.4: #Тунель
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('tunnel_sign', )
                 # self.get_logger().info(f"Now state is: {self.state_machine.get_state()} conf")
@@ -1092,7 +1149,7 @@ class TunnelObstacle(Obstacle):
                     self.max_rad = odom['orient'] + np.pi / 2
                     # log(robot, f"Min rad: {self.min_rad} Max rad: {self.max_rad} Cur rad: {odom['orient']}", 'GOOD_INFO')
                     self.state += 1
-                    robot.move_task(0.4)
+                    robot.move_task(0.6)
                 case 1:
                     # Повернемся по направлению где наибольшая дистанция
                     for box in robot.boxes:
@@ -1203,8 +1260,12 @@ class ParkingObstacle(Obstacle):
                     robot.move_task(0.45)
                     self.state += 1
                 case 10:
+                    robot.move(0.0)
                     robot.lane_follow.just_follow(robot, hold_side='left')
-                    # self.state += 1
+                    if ((np.degrees(robot.get_rotate_angle()) <= -170 and np.degrees(robot.get_rotate_angle()) >= -180) or 
+                            (np.degrees(robot.get_rotate_angle()) >= 170 and np.degrees(robot.get_rotate_angle()) <= 180)):
+                        robot.lane_follow.just_follow(robot)
+                        # self.state += 1
                 # case 10:
                 #     for box in robot.boxes:
                 #         if box['label'] == 'parking_sign':
