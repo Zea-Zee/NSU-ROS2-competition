@@ -142,11 +142,11 @@ class Robot(Node):
         self.orientation = None
 
         self.wall_state = 0
-        self.can_move = True #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
+        self.can_move = False #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
         self.side = None
         self.linear_velocity = None
         self.angular_velocity = None
-        self.completed_walls = True #!!!!!!!!!!!!!!!!!!
+        self.completed_walls = False #!!!!!!!!!!!!!!!!!!
         # information about spawn position
         self.declare_parameter('spawn_x', 0.0)
         self.declare_parameter('spawn_y', 0.0)
