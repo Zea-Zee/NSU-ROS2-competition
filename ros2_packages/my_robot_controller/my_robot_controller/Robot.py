@@ -647,7 +647,7 @@ class Robot(Node):
                 self.lane_follow.just_follow(self, hold_side='left')
                 if ((np.degrees(self.get_rotate_angle()) <= -170 and np.degrees(self.get_rotate_angle()) >= -180) or 
                         (np.degrees(self.get_rotate_angle()) >= 170 and np.degrees(self.get_rotate_angle()) <= 180)):
-                    self.lane_follow.just_follow(self, speed=0.18)
+                    self.lane_follow.just_follow(self)
 
 
         #self.get_logger().info(f'{min(self.get_lidar().ranges[135:225])}')
