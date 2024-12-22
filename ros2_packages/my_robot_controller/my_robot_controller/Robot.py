@@ -9,6 +9,7 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from cv_bridge import CvBridge
 import numpy as np
+from std_msgs.msg import String
 from sensor_msgs.msg import Image, LaserScan
 from nav_msgs.msg import Odometry
 from .Detector import Detector
@@ -132,6 +133,7 @@ class Robot(Node):
         self.lane_follow = LaneFollowing() # LaneFollower class
         self.not_finished = True
         self.mode = None
+        self.start_time = None
 
         # additional variables for moving
         self.boxes = None
@@ -217,7 +219,7 @@ class Robot(Node):
             self._lidar_callback,
             10
         )
-
+        self.finish = self.create_publisher(String, 'robot_finish', 10)
         # self.detector_thread = threading.Thread(target=self.run_detector, daemon=True)
         # self.detector_thread.start()
 
@@ -448,7 +450,7 @@ class Robot(Node):
 
         side = get_cross_road(self.boxes)
         angular_z = 1
-        cross_speed = 0.165
+        cross_speed = 0.14
         if side is not None:
             side = side.split('_')[0]
             if self.side is None:
@@ -780,10 +782,15 @@ class Robot(Node):
         return False
 
     def working_area(self):
+        """
+        Проходит стройплощадку с блоками, 
+        обнаруживая их с помощью лидара
+        """
         distance_to_lidar = self.get_sectored_lidar()[0]
         log(self, f"Target current distance to wall: {distance_to_lidar}", 'INFO')
+        
         if not self.completed_walls and distance_to_lidar > 0.18:
-            self.lane_follow.just_follow(self, hold_side='right')
+            self.lane_follow.just_follow(self, 0.13, hold_side='right')
         else:
             self.completed_walls = True
             # hard coding
@@ -846,6 +853,7 @@ class Robot(Node):
                     log(self,
                         f"Robot interface initialized with state {self.state_machine.get_state()}", "GOOD_INFO")
                     self.fully_initialized = True
+                    self.start_time = time.time()
                 else:
                     return None
 
@@ -901,6 +909,21 @@ class Robot(Node):
         except Exception as e:
             log(self, f"Robot.process_mode(): {e}", "CRITICAL_ERROR")
 
+    def finish_run(self):
+        """
+        Здесь завершается заезд и публикуется имя команды в топик
+        """
+        self.can_move = False
+        self.move(0.0, 0.0)
+        end_time = time.time()
+        elapsed = time.time() - self.start_time
+        info = f'ROSgrom: {elapsed} time'
+        log(self, "Successfully completed task", 'GOOD_INFO')
+        msg = String()
+        msg.data = info
+        self.finish.publish(msg)
+
+
     # Запуск детектора yolo
     def run_detector(self) -> None:
         # Запускает детектор, который получает боксы из YOLO в виде списка словарей, посмотреть структуру можно внутри функции
@@ -955,7 +978,8 @@ class Robot(Node):
                 self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                 self.state_machine.set_state('tunnel_sign', )
                 # self.get_logger().info(f"Now state is: {self.state_machine.get_state()} conf")
-
+            elif box['label'].startswith('traffic') and box['conf'] > 0.85 and self.completed_walls:
+                self.finish_run()
             else:
                 pass
 
