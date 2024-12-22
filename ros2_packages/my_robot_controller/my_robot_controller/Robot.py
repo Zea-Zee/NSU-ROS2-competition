@@ -132,6 +132,7 @@ class Robot(Node):
         self.lane_follow = LaneFollowing() # LaneFollower class
         self.not_finished = True
         self.mode = None
+        self.start_time = None
 
         # additional variables for moving
         self.boxes = None
@@ -780,8 +781,13 @@ class Robot(Node):
         return False
 
     def working_area(self):
+        """
+        Проходит стройплощадку с блоками, 
+        обнаруживая их с помощью лидара
+        """
         distance_to_lidar = self.get_sectored_lidar()[0]
         log(self, f"Target current distance to wall: {distance_to_lidar}", 'INFO')
+        
         if not self.completed_walls and distance_to_lidar > 0.18:
             self.lane_follow.just_follow(self, hold_side='right')
         else:
