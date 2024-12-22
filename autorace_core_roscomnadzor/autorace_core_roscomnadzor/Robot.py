@@ -22,7 +22,6 @@ PROCESS_FREQUENCY = 100
 
 def log(node: Node, message: str, log_type: str='-'):
     """Кастомный логгер.
-
     Args:
         node (Node): Нода из которой будет сообщение
         message (str): Сообщение
@@ -58,22 +57,16 @@ def log(node: Node, message: str, log_type: str='-'):
 
 
 class StateMachine:
+    '''
+    Нужна для отслеживания текущего задания
+    '''
     def __init__(self, states, log_node):
         self.states = states
         self.current_state = states[0]
         self.name_to_index = {name: i for i, name in enumerate(states)}
         self.log_node = log_node
 
-    def increase_state(self):
-        index = self.name_to_index[self.current_state]
-        next_index = (index + 1) % len(self.states)
-        self.current_state = self.states[next_index]
-
-    def decrease_state(self):
-        index = self.name_to_index[self.current_state]
-        prev_index = (index - 1) % len(self.states)
-        self.current_state = self.states[prev_index]
-
+    # Задать состояние (задачу)
     def set_state(self, state):
         if state not in self.states:
             log(self.log_node, f"You are trying to set incorrect state: {state}", 'CRITICAL_ERROR')
@@ -82,36 +75,18 @@ class StateMachine:
             log(self.log_node, f'Transit from {self.current_state} to {state}', 'NEW_OBSTACLE')
         self.current_state = self.states[index]
 
-    def set_next_state(self, state):
-        """ Replace state with yours if it is next.
-
-        Args:
-            state (str): State u can try to set
-
-        Returns:
-            Bool: If it really next state for current it will be set and return True else return False
-        """
-        index = self.name_to_index[state]
-        if self.name_to_index[self.current_state] + 1 == index:
-            self.increase_state()
-            return True
-        return False
-
+    # Получить текущее состояние (задачу)
     def get_state(self):
         return self.current_state
 
 
 class Robot(Node):
+    '''
+    Основной класс управления роботом
+    '''
     def __init__(self, mode: str = 'auto', state: str = None, camera=None, odom=None, twist=None):
         super().__init__("moving_robot")
         # Аргумент изначально будет приходить из параметров запуска, чтобы можно было управлять вручную
-        modes = [
-            'auto',
-            'manual',
-        ]
-        if mode not in modes:
-            mode = 'auto'
-
         self.fully_initialized = False
 
         # Создаем машину состояний состояющую из препятствий
@@ -142,15 +117,16 @@ class Robot(Node):
         self.orientation = None
 
         self.wall_state = 0
-        self.can_move = False #!!!!!!!!!!!! ПОМЕНЯТЬ НА False
+        self.can_move = False
         self.side = None
         self.linear_velocity = None
         self.angular_velocity = None
-        self.completed_walls = False #!!!!!!!!!!!!!!!!!!
+        self.completed_walls = False
+        
         # information about spawn position
-        self.declare_parameter('spawn_x', 0.0)
-        self.declare_parameter('spawn_y', 0.0)
-        self.declare_parameter('spawn_z', 0.0)
+        self.declare_parameter('spawn_x', 0.8)
+        self.declare_parameter('spawn_y', -1.747)
+        self.declare_parameter('spawn_z', 0.08)
         self.declare_parameter('spawn_angle', 0.0)  # Значение по умолчанию
 
         self.spawn_odom = {
@@ -334,6 +310,7 @@ class Robot(Node):
             'angular_velocity': self.angular_velocity,
         }
 
+    # Получить угол поворота робота относительно старта 
     def get_rotate_angle(self):
         x, y, z, w = self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w
         yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) + self.spawn_angle
@@ -397,14 +374,14 @@ class Robot(Node):
     Just work here and don't care
     """
 
-
+    # Задать скорость и поворот
     def move(self, linear_x=0.0, angular_z=0.0):
         cmd = Twist()
         cmd.linear.x = linear_x
         cmd.angular.z = angular_z
         self.cmd_vel_publisher.publish(cmd)
 
-    # traffic_lights moving
+    # Обработка светофора, т.е. момента когда можно ехать
     def obey_traffic_lights(self):
         # additional function
         def get_traffic_box(boxes):
@@ -425,7 +402,7 @@ class Robot(Node):
         if traffic_light_color.endswith('green') or (traffic_light_color == 'None' and self.can_move):
             self.state_machine.set_state('just_follow')
 
-    # T-cross completing function
+    # Функция обработки перекрёстка
     def T_cross_road(self):
         # additional function
         def get_cross_road(boxes):
@@ -455,6 +432,7 @@ class Robot(Node):
                 angular_z = 0.8
         self.lane_follow.just_follow(self, speed=cross_speed, z_speed=angular_z, hold_side=self.side)
 
+    # Функция обработки пешеходного перехода
     def pedestrian_crossing(self):
         match self.ped_state:
             case 0:
@@ -505,8 +483,8 @@ class Robot(Node):
                 self.detect_available = True
                 self.state_machine.set_state('just_follow')
 
+    # Вторая реализация парковки (не используется)
     def parking_task(self):
-        # Лидар, в массиве ranges от -pi до pi, -pi СПЕРЕДИ | -25, 25 | 155:205
         match(self.parking_state):
             case 0:
                 self.lane_follow.just_follow(self, hold_side='left')
@@ -799,19 +777,7 @@ class Robot(Node):
                     self.lane_follow.just_follow(self, hold_side='right', standart_speed=True)
                     self.detect_available = True
 
-                    #self.state_machine.set_state('just_follow')
-            # self.move(linear_x=0.0, angular_z=0.3)
-            # time.sleep(1)
-            # self.move(linear_x=0.2, angular_z=0.0)
-            # time.sleep(1)
-            # self.move(linear_x=0.0, angular_z=0.3)
-            # time.sleep(1)
-            # self.move(linear_x=0.2, angular_z=0.0)
-            # time.sleep(1)
-            # self.move(linear_x=0.0, angular_z=-0.3)
-
-    # Main function
-
+    # Включение обработки задач в зависимости от состояния state_machine
     def process_mode(self):
         try:
             # Проверка загрузились ли все датчики
@@ -847,8 +813,7 @@ class Robot(Node):
 
             elif self.cv_image is not None:
                 self.mode = self.state_machine.get_state()
-
-                #['traffic_light', 'T_crossroad', 'works_sign', 'parking_sign', 'crossing_sign', 'tunnel_sign', 'just_follow']
+                # Основной блок управления задачами
                 match (self.mode):
                     case 'traffic_light':
                         self.obey_traffic_lights()
@@ -856,13 +821,11 @@ class Robot(Node):
                         self.T_cross_road()
                     case 'works_sign':
                         self.working_area()
-                        # Функция прохождения лабиринта
                     case 'parking_sign':
                         # self.parking_task() #IVAN
                         self.state_machine.set_state('parking_sign')
                         self.obstacles['parking'].process(self) # GLEB
                     case 'crossing_sign':
-                        #self.lane_follow.just_follow(self, speed=0.0) #??????????????????????????????????????
                         self.pedestrian_crossing()
                     case 'tunnel_sign':
                         self.obstacles['tunnel'].process(self)
@@ -875,6 +838,7 @@ class Robot(Node):
         except Exception as e:
             log(self, f"Robot.process_mode(): {e}", "CRITICAL_ERROR")
 
+    # Функция завершения соревнования, отправляет сообщение в топик и выводит время
     def finish_run(self):
         """
         Здесь завершается заезд и публикуется имя команды в топик
@@ -905,7 +869,6 @@ class Robot(Node):
     # Определение испытания по bb из yolo
     def check_for_state_transition(self, boxes):
         if self.detect_available:
-        # Возмонжо стоит поменять, запускается из детектора и пытается перейти к следующему состоянию по условию
             curr_depth_image = self.depth_image
             for box in boxes:
                 bbox = curr_depth_image[int(box['y_min']):int(box['y_max']), int(box['x_min']):int(box['x_max'])]
@@ -919,7 +882,7 @@ class Robot(Node):
 
                 elif box['label'] == 'works_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.3: #Стены
                     self.get_logger().info(f'{np.degrees(self.get_rotate_angle())}')
-                    if (np.degrees(self.get_rotate_angle()) >= -45 and np.degrees(self.get_rotate_angle()) <= 45):
+                    if (np.degrees(self.get_rotate_angle()) >= -45 and np.degrees(self.get_rotate_angle()) <= 45): #Проверка на положение робота
                         self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                         self.state_machine.set_state('works_sign')
 
