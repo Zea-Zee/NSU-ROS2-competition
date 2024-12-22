@@ -790,7 +790,7 @@ class Robot(Node):
         log(self, f"Target current distance to wall: {distance_to_lidar}", 'INFO')
         
         if not self.completed_walls and distance_to_lidar > 0.18:
-            self.lane_follow.just_follow(self, 0.15, hold_side='right')
+            self.lane_follow.just_follow(self, 0.13, hold_side='right')
         else:
             self.completed_walls = True
             # hard coding
