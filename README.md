@@ -3,4 +3,6 @@
 ## Требуемые библиотеки и пакеты:
 ```
 pip install ultralytics
+pip install pygame
+pip install keyboard
 ```
