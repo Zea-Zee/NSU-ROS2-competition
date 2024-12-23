@@ -177,6 +177,10 @@ class Robot(Node):
         self.current_task = None
         self.target_odom = None
 
+        # Начальная точка выполнения задания move/rotate
+        self.initial_odom = None
+        self.target_distance = None
+
         self.create_subscription(
             Image,
             '/color/image',
@@ -609,7 +613,7 @@ class Robot(Node):
                         (np.degrees(self.get_rotate_angle()) >= 170 and np.degrees(self.get_rotate_angle()) <= 180)):
                     self.lane_follow.just_follow(self)
 
-    def move_task(self, distance, linear_x=0.15):
+    def move_task(self, distance, linear_x=0.15, safe_threshold=0.2):
         """Дает задание для движения прямо ровно на заданную дистанцию.
 
         Args:
@@ -619,7 +623,11 @@ class Robot(Node):
         Returns:
             _type_: Просто ноль, #TODO:Убрать.
         """
+        if distance < 0:
+            log(self, f"Cant register negative distance task: {distance}", "CRITICAL_ERROR")
         odom = self.get_normalized_odometry()
+        distances = self.get_sectored_lidar()
+        self.initial_odom = odom
         new_x = odom['pos'][0] + np.cos(odom['orient']) * distance
         new_y = odom['pos'][1] + np.sin(odom['orient']) * distance
         self.target_odom = {
@@ -628,8 +636,8 @@ class Robot(Node):
             'linear_v': linear_x,
             'angular_v': odom['angular_v']
         }
-        log(self, f"Registered move task for {distance} distance", 'INFO')
-        self.move(linear_x=linear_x)
+        self.target_distance = ((self.target_odom['pos'][0] - self.initial_odom['pos'][0])**2 +(self.target_odom['pos'][1] - self.initial_odom['pos'][1])**2)**0.5
+        log(self, f"Registered move task for {distance} distance, computed distance: {self.target_distance}", 'INFO')
         self.current_task = 'move'
         log(self, f"Cur odom: {odom}", 'INFO')
         log(self, f"Target odom: {self.target_odom}", 'INFO')
@@ -645,7 +653,9 @@ class Robot(Node):
         Returns:
             _type_: Просто ноль, #TODO:Убрать.
         """
+        
         odom = self.get_normalized_odometry()
+        self.initial_odom = odom
         new_orient = odom['orient'] + angle_diff
         log(self, f"New orient: {new_orient}, cut cond: {new_orient >= (2 * np.pi)}", 'INFO')
     
@@ -668,7 +678,7 @@ class Robot(Node):
         log(self, f"Target odom: {self.target_odom}", 'INFO')
         return 0
 
-    def is_task_completed(self, epsilon=0.02, min_v=0.025, max_v=0.75, min_w=np.pi / 8, max_w=np.pi / 3, safe_mode=True):
+    def is_task_completed(self, epsilon=0.02, min_v=0.025, max_v=1.25, min_w=np.pi / 8, max_w=np.pi / 3, safe_mode=True, linear_epsilon=None, safe_threshold=0.2):
         """Проверяет выполнено ли задание, возвращает ответ, регулирует скорость.
             Должна первоочередно вызываться в robot.process_mode() для правильной обработки заданий.
 
@@ -682,7 +692,22 @@ class Robot(Node):
         Returns:
             _type_: True если задание выполнены, иначе False
         """
+        if epsilon == 0.02:
+            linear_epsilon = 0.05
+        else:
+            linear_epsilon = epsilon
         odom = self.get_normalized_odometry()
+
+        def stop():
+            if abs(odom['linear_v']) > 0.05:
+                self.move(0.0, 0.0)
+                log(self, f"Can't stop, velocity is too high: {odom['linear_v']}")
+                time.sleep(0.025)
+                return False
+            self.current_task = None
+            self.target_odom = None
+            log(self, "Finished move task", 'INFO')
+            return True
 
         err_x = max(self.target_odom['pos'][0], odom['pos'][0]) - min(self.target_odom['pos'][0], odom['pos'][0])
         err_y = max(self.target_odom['pos'][1], odom['pos'][1]) - min(self.target_odom['pos'][1], odom['pos'][1])
@@ -692,24 +717,26 @@ class Robot(Node):
 
         if self.current_task == 'move':
             if safe_mode:
-                if min(distances[-1], distances[0], distances[1]) < 0.2:
-                    self.current_task = None
-                    self.target_odom = None
-                    self.move(0.0, 0.0)
+                if distances[-1] < 1.75 * safe_threshold or 1.25 * distances[0] < safe_threshold or 1.75 * distances[1] < safe_threshold:
+                    self.move(odom['linear_v'] * 0.25)
+                if distances[-2] < 0.1 or distances[-1] < 1.2 * safe_threshold or distances[0] < safe_threshold or 1.2 * distances[1] < safe_threshold or distances[2] < 0.1:
+                    self.move(-0.0499, 0.0)
                     log(self, "!UNSAFE DISTANCE! Finished move task", 'ERROR')
                     log(self, f"Distances were: {[distances[-1], distances[0], distances[1]]}")
                     time.sleep(0.1)
-                    return True
-            if abs(err_x) < epsilon and abs(err_y) < epsilon:
-                if random.randint(0, 25) == 1:
-                    log(self, f"Cur pos {odom['pos']}", 'INFO')
-                self.current_task = None
-                self.target_odom = None
-                log(self, "Finished move task", 'INFO')
+                    stop()
+            # Текущее пройденное расстояние
+            current_distance = ((self.initial_odom['pos'][0] - odom['pos'][0])**2 + (self.initial_odom['pos'][1] - odom['pos'][1])**2)**0.5
+            # Проверяем, не проехал ли робот больше, чем нужно
+            if current_distance >= self.target_distance:
                 self.move(0.0, 0.0)
-                time.sleep(0.1)
-                return True
-            new_v = max(err_x, err_y) * max_v
+                log(self, f"Overreach move for{current_distance - self.target_distance}", 'INFO')
+                stop()
+            if abs(err_x) < linear_epsilon and abs(err_y) < linear_epsilon:
+                stop()
+            distance_diff = abs(abs(current_distance) - abs(self.target_distance))
+            new_v = min(distance_diff * max_v, max_v)
+            # new_v = max(err_x, err_y) * max_v
             self.move(linear_x=new_v)
             return False
         elif self.current_task == 'rotate':
@@ -737,7 +764,7 @@ class Robot(Node):
         distance_to_lidar = self.get_sectored_lidar()[0]
         log(self, f"Target current distance to wall: {distance_to_lidar}", 'INFO')
         
-        if not self.completed_walls and distance_to_lidar > 0.25:
+        if not self.completed_walls and distance_to_lidar > 0.275:
             self.lane_follow.just_follow(self, 0.2, 1.0, hold_side='right') #speed !!!!!!!!!!!!!!!!!!!!!!!!!!!!
             self.detect_available = False #!!!!!!!!!!!!!!!
         else:
@@ -757,7 +784,7 @@ class Robot(Node):
                     self.rotate_task(-np.pi/2)
                     self.wall_state += 1
                 case 4:
-                    self.move_task(0.55)
+                    self.move_task(0.5)
                     self.wall_state += 1
                 case 5:
                     self.rotate_task(-np.pi/2)
@@ -807,6 +834,9 @@ class Robot(Node):
                         return None
                 elif self.state_machine.get_state() == 'works_sign':
                     if not self.is_task_completed(epsilon=0.1):
+                        return None
+                elif self.state_machine.get_state() == 'tunnel':
+                    if not self.is_task_completed(max_v=0.225, linear_epsilon=0.1, safe_threshold=0.225):
                         return None
                 elif not self.is_task_completed():
                     return None
@@ -894,9 +924,9 @@ class Robot(Node):
                     self.get_logger().info(f"{box['label']}: {box['conf']} conf")
                     self.state_machine.set_state('crossing_sign')
 
-                elif box['label'] == 'tunnel_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.4: #Тунель
+                elif box['label'] == 'tunnel_sign' and box['conf'] > 0.85 and bbox[len(bbox)//2, len(bbox[0])//2] <= 0.375: #Тунель
                     self.get_logger().info(f"{box['label']}: {box['conf']} conf")
-                    self.state_machine.set_state('tunnel_sign', )
+                    self.state_machine.set_state('tunnel_sign')
 
                 elif box['label'].startswith('traffic') and box['conf'] > 0.85 and self.completed_walls and bbox[len(bbox)//2, len(bbox[0])//2] <= 1.0:
                     self.finish_run()
@@ -1090,6 +1120,22 @@ class TunnelObstacle(Obstacle):
         log(robot, f"Distance diff: {self.distance_diff}", 'GOOD_INFO')
         log(robot, f"l_range: {left_range}, r_range: {right_range}, max_left_idx: {max_left_index}, max_right_idx: {max_right_index}, max_idx: {max_i}", 'GOOD_INFO')
 
+    def try_leave_tunnel(self, robot):
+        depth_image = robot.depth_image
+        for box in robot.boxes:
+            if box['label'] == 'traffic_light_green' and box['conf'] > 0.85:
+                depth_bbox = depth_image[int(box['y_min']):int(box['y_max']), int(box['x_min']):int(box['x_max'])]
+                depth_distance = depth_bbox[len(depth_bbox)//2, len(depth_bbox[0])//2]
+                log(robot, f"Traffic light distance: {depth_distance}")
+                if depth_distance < 1.4:
+                    log(robot, "Leaving tunnel")
+                    robot.move(0.0, 0.0)
+                    robot.lane_follow.just_follow(robot)
+                    robot.state_machine.set_state('just_follow')
+                    return True
+                return 0.15  # Максимальная дистанция для движения
+        return None
+
     def process(self, robot: Robot):
         try:
             sectored_distances = robot.get_sectored_lidar()
@@ -1103,28 +1149,26 @@ class TunnelObstacle(Obstacle):
                     self.min_rad = odom['orient']
                     self.max_rad = odom['orient'] + np.pi / 2
                     # log(robot, f"Min rad: {self.min_rad} Max rad: {self.max_rad} Cur rad: {odom['orient']}", 'GOOD_INFO')
-                    self.state += 1
+                    self.state = 0.5
+                    robot.rotate_task(np.pi / 24)
+                case 0.5:
+                    self.state = 1
                     robot.move_task(0.6)
                 case 1:
                     # Повернемся по направлению где наибольшая дистанция
-                    for box in robot.boxes:
-                        if box['label'] == 'traffic_light_green' and box['conf'] > 0.6:
-                            log(robot, "Leaving tunnel")
-                            robot.lane_follow.just_follow(robot, hold_side='right')
-                            robot.state_machine.set_state('just_follow')
-                            return None
                     self.filter_lidar_angles(sectored_distances, odom, robot)
                     robot.rotate_task(self.angle_diff)
                     self.state += 1
                 case 2:
+                    max_dst = self.try_leave_tunnel(robot)
                     # Проедем половину наибольшей дистанции и вернемся к предыдущему шагу
-                    for box in robot.boxes:
-                        if box['label'] == 'traffic_light_green' and box['conf'] > 0.6:
-                            log(robot, "Leaving tunnel")
-                            robot.lane_follow.just_follow(robot, hold_side='right')
-                            robot.state_machine.set_state('just_follow')
-                            return None
-                    robot.move_task(self.distance_diff)
+                    if max_dst is True:
+                        self.state += 1
+                        return True
+                    elif max_dst is not None:
+                        robot.move_task(min(self.distance_diff, max_dst), safe_threshold=0.25)
+                    else:
+                        robot.move_task(self.distance_diff, safe_threshold=0.25)
                     self.state -= 1
                 #     log(robot, f"FINISH Error x: {err_x:.3f}, error y: {err_y:.3f}, error angle: {err_a:.4f}", 'GOOD_INFO')
             return None
