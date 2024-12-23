@@ -23,7 +23,7 @@ def resolve_start_position(context, sp):
         '2': [0.67, 0.25, 0.08, 0.0],
         '3': [1.2, 1.75, 0.08, 3.14],
         '4': [-1.60, 1.25, 0.08, 0.0],
-        '5': [-1.75, 0.4, 0.08, 3.14*1.5],
+        '5': [-1.55, 0.8, 0.08, 3.14*1.15],
         '6': [0.3, 1.75, 0.08, 3.14],
     }
 
@@ -119,7 +119,7 @@ def generate_launch_description():
         }],
         output='screen'
     )
-    
+
     robot_controller = Node(
         package='my_robot_controller',
         executable='run',
